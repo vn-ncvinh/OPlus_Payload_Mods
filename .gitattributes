@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+*.jar binary
+*.pk8 binary
+*.img binary
+bin/Linux/x86_64/* binary
+bin/package/DISABLE_AVB/HMATools/aosp/plugged/bin/* binary
+bin/package/DISABLE_AVB/HMATools/aosp/plugged/lib/* binary

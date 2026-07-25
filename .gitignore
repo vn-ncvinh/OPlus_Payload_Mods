@@ -1,0 +1,9 @@
+/output/
+/tmp/
+/work/
+/*.bin
+/*.img
+/*.zip
+/*.aria2
+*.pyc
+__pycache__/

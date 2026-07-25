@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source "$ROOT_DIR/functions.sh"
+
+HMA_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+output_dir="${1:-}"
+[[ -n "$output_dir" && -d "$output_dir" ]] || die "HMATools requires an output directory"
+
+chmod -R +x "$HMA_DIR/aosp" 2>/dev/null || true
+
+patch_boot_image() {
+    local part="$1"
+    local input="$RAW_DIR/$part.img"
+    local local_image="$HMA_DIR/$part.img"
+    local result
+
+    if [[ ! -f "$input" ]]; then
+        warn "$part.img is absent; HMATools skipped it"
+        return 0
+    fi
+
+    mods "HMATools patching $part.img"
+    rm -rf -- "$HMA_DIR/build" "$HMA_DIR/boot.img" "$HMA_DIR/vendor_boot.img" \
+        "$HMA_DIR/boot.img.signed" "$HMA_DIR/vendor_boot.img.signed" \
+        "$HMA_DIR/boot.img.clear" "$HMA_DIR/vendor_boot.img.clear"
+    cp -f "$input" "$local_image"
+
+    (
+        cd "$HMA_DIR"
+        java -jar "$HMA_DIR/bbootimg.jar" unpack >/dev/null 2>&1
+    ) || die "HMATools could not unpack $part.img"
+
+    [[ -d "$HMA_DIR/build/unzip_boot" ]] || die "HMATools produced no ramdisk for $part.img"
+    if ! disable_avb_verify "$HMA_DIR/build/unzip_boot"; then
+        warn "No AVB fstab flags were found in $part.img ramdisk"
+    fi
+
+    if [[ -f "$HMA_DIR/build/unzip_boot/intermediate/$part.img.clear" ]]; then
+        cp -f "$HMA_DIR/build/unzip_boot/intermediate/$part.img.clear" "$HMA_DIR/$part.img.clear"
+    fi
+
+    (
+        cd "$HMA_DIR"
+        java -jar "$HMA_DIR/bbootimg.jar" pack >/dev/null 2>&1
+    ) || die "HMATools could not repack $part.img"
+
+    if [[ -s "$HMA_DIR/$part.img.signed" ]]; then
+        result="$HMA_DIR/$part.img.signed"
+    elif [[ -s "$local_image" ]]; then
+        result="$local_image"
+    else
+        die "HMATools produced no $part.img output"
+    fi
+    cp -f "$result" "$output_dir/$part.img"
+
+    (
+        cd "$HMA_DIR"
+        java -jar "$HMA_DIR/bbootimg.jar" clear >/dev/null 2>&1
+    ) || warn "HMATools cleanup failed after $part.img"
+    rm -f -- "$HMA_DIR/boot.img" "$HMA_DIR/vendor_boot.img" \
+        "$HMA_DIR/boot.img.signed" "$HMA_DIR/vendor_boot.img.signed" \
+        "$HMA_DIR/boot.img.clear" "$HMA_DIR/vendor_boot.img.clear"
+    mods "HMATools patched $part.img"
+}
+
+patch_boot_image boot
+patch_boot_image vendor_boot

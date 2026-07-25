@@ -1,0 +1,7 @@
+# Let Package Manager scan the stock Google-signed APK before exposing Morphe.
+on post-fs-data
+    mount none /data/local/tmp/no-morphe /my_product/app/YouTubeMorphe bind
+
+on property:sys.boot_completed=1
+    umount /my_product/app/YouTubeMorphe
+    mount none /my_product/etc/youtube-morphe /my_product/app/YouTubeMorphe bind
