@@ -48,7 +48,11 @@ while IFS= read -r -d '' jar_path; do
     mark_modified_path "$jar_path"
     patched_total=$((patched_total + count))
     mods "Secure-flag patch applied to $jar_path ($count targets)"
-done < <(find "$IMAGES_DIR" -type f -iname '*services.jar' -print0)
+done < <(
+    find "$IMAGES_DIR" -type f \
+        \( -name services.jar -o -name oplus-services.jar -o -name miui-services.jar \) \
+        -print0
+)
 
 [[ "$patched_total" -gt 0 ]] || die "No compatible secure-flag target was found"
 mods "Secure-flag patch completed ($patched_total targets)"

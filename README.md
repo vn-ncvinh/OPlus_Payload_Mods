@@ -7,7 +7,7 @@ This repository is a standalone extraction of the required tooling and patch log
 ## Included patches
 
 - Exact-name debloat using `bin/ddevice/DEBLOAT/APPLIST.txt`.
-- YouTube Morphe without microG, installed under `my_product` and activated by Android init.
+- YouTube Morphe without microG. The stock APK remains at `my_product/app/YouTube/YouTube.apk`; Android init bind-mounts Morphe over the OPlus `/product/app/YouTube` overlay view after Package Manager scans it.
 - Kousei Google Photos Pixel XL spoof and secure-flag/screen-capture bypass.
 - Full DISABLE_AVB flow: `vbmeta*`, vendor fstab, `boot` and `vendor_boot` ramdisks.
 
@@ -25,6 +25,10 @@ chmod +x start-oplus.sh bin/Linux/x86_64/*
 ```
 
 Use `./start-oplus.sh --help` for patch toggles and output options. The script emits raw partition images rather than rebuilding an OTA payload.
+
+EROFS images are rebuilt with their extracted UUID, compression cluster size, timestamp and real mount point such as `/system` or `/my_product`.
+
+The current paths and patch anchors were checked against an unpacked CPH2841 Android 16 payload; see [`docs/cph2841-layout.md`](docs/cph2841-layout.md).
 
 ## Warning
 

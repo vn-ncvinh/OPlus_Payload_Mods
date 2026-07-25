@@ -1,4 +1,12 @@
 GameCenterGlobal
+# ColorOS/OxygenOS directory names verified from the unpacked CPH2841 payload.
+Facebook-appmanager
+Facebook-installer
+Facebook-services
+Browser
+Music
+OplusGames
+VideoGallery
 GoogleOne
 MIUIGlobalLayout
 MIUIMiPicks

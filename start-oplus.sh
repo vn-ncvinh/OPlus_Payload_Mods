@@ -152,7 +152,7 @@ has_partition my_product || die "Payload has no my_product partition"
 selected=()
 for part in "${payload_partitions[@]}"; do
     case "$part" in
-        system|system_ext|product|vendor|my_* ) selected+=("$part") ;;
+        system|system_ext|product|vendor|odm|my_* ) selected+=("$part") ;;
         boot|vendor_boot|vbmeta|vbmeta_system|vbmeta_vendor )
             [[ "$enable_avb" == true ]] && selected+=("$part")
             ;;
@@ -236,6 +236,13 @@ repack_partition() {
     local fs="${FS_TYPE[$part]:-}"
     local fs_config="$CONFIG_DIR/${part}_fs_config"
     local file_contexts="$CONFIG_DIR/${part}_file_contexts"
+    local fs_options="$CONFIG_DIR/${part}_fs_options"
+    local erofs_uuid=""
+    local erofs_compression="-zlz4hc"
+    local erofs_cluster=""
+    local parsed_compression=""
+    local parsed_cluster=""
+    local -a erofs_args=()
 
     [[ -d "$tree" ]] || die "Modified partition tree is missing: $part"
     [[ "$original_size" -gt 0 ]] || die "Original size is unknown for $part"
@@ -253,7 +260,20 @@ repack_partition() {
                 || die "Failed to repack $part as EXT4"
             ;;
         EROFS)
-            "$MKFS_EROFS" --quiet -zlz4hc,9 --mount-point "$part" \
+            if [[ -f "$fs_options" ]]; then
+                erofs_uuid="$(sed -n -E 's/^Filesystem UUID:[[:space:]]*([^[:space:]]+).*/\1/p' "$fs_options" | head -n 1)"
+                parsed_compression="$(sed -n -E 's/^mkfs\.erofs options:[[:space:]]+(-z[^[:space:]]+).*/\1/p' "$fs_options" | head -n 1)"
+                parsed_cluster="$(sed -n -E 's/^mkfs\.erofs options:.* -C ([0-9]+).*/\1/p' "$fs_options" | head -n 1)"
+                [[ -n "$parsed_compression" ]] && erofs_compression="$parsed_compression"
+                [[ -n "$parsed_cluster" ]] && erofs_cluster="$parsed_cluster"
+            else
+                erofs_cluster="16384"
+            fi
+
+            erofs_args=(--quiet "$erofs_compression" -T 0)
+            [[ -n "$erofs_cluster" ]] && erofs_args+=(-C "$erofs_cluster")
+            [[ -n "$erofs_uuid" ]] && erofs_args+=(-U "$erofs_uuid")
+            "$MKFS_EROFS" "${erofs_args[@]}" --mount-point "/$part" \
                 --fs-config-file="$fs_config" --file-contexts="$file_contexts" \
                 "$output" "$tree" >/dev/null \
                 || die "Failed to repack $part as EROFS"

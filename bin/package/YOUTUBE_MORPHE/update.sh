@@ -79,19 +79,19 @@ while IFS= read -r -d '' apk; do
             *) die "Refusing to remove unsafe APK directory: $apk_parent" ;;
         esac
     fi
-done < <(find "$IMAGES_DIR" -type f -iname '*.apk' -print0)
+done < <(find "$IMAGES_DIR" -type f -iname '*.apk' -ipath '*youtube*' -print0)
 
 my_product="$IMAGES_DIR/my_product"
 system_root="$IMAGES_DIR/system"
 [[ -d "$system_root/system/framework" ]] && system_root="$system_root/system"
-stock_target="$my_product/app/YouTubeMorphe"
+stock_target="$my_product/app/YouTube"
 patched_target="$my_product/etc/youtube-morphe"
 init_target="$system_root/etc/init"
 
 rm -rf -- "$stock_target" "$patched_target"
 mkdir -p "$stock_target/lib/arm64" "$patched_target/lib/arm64" "$init_target"
-cp -f "$stock_apk" "$stock_target/base.apk"
-cp -f "$patched_apk" "$patched_target/base.apk"
+cp -f "$stock_apk" "$stock_target/YouTube.apk"
+cp -f "$patched_apk" "$patched_target/YouTube.apk"
 cp -f "$ROOT_DIR/bin/package/YOUTUBE_MORPHE/youtube-morphe.rc" "$init_target/youtube-morphe.rc"
 
 mapfile -t native_libs < <(unzip -Z1 "$stock_apk" | grep '^lib/arm64-v8a/.*\.so$' || true)
