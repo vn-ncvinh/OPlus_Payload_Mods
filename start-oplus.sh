@@ -21,8 +21,8 @@ Options:
   --youtube-morphe-url <url>    Pin a YouTube Morphe module ZIP
   --skip-debloat                Skip debloat
   --skip-youtube-morphe         Skip YouTube Morphe integration
-  --skip-kousei                 Skip Google Photos and secure-flag patches
-  --skip-avb                    Skip vbmeta, vendor fstab and boot ramdisk patches
+  --skip-photos-spoof           Skip Google Photos Pixel XL spoof
+  --skip-secure-flag            Skip secure-flag/screen-capture bypass
   --keep-workdir                Keep temporary extracted files
   -h, --help                    Show this help
 EOF
@@ -35,8 +35,8 @@ output_dir="$ROOT_DIR/output"
 youtube_morphe_url=""
 enable_debloat=true
 enable_youtube=true
-enable_kousei=true
-enable_avb=true
+enable_photos_spoof=true
+enable_secure_flag=true
 keep_workdir=false
 
 while [[ $# -gt 0 ]]; do
@@ -55,8 +55,8 @@ while [[ $# -gt 0 ]]; do
         --youtube-morphe-url=*) youtube_morphe_url="${1#*=}"; shift ;;
         --skip-debloat) enable_debloat=false; shift ;;
         --skip-youtube-morphe) enable_youtube=false; shift ;;
-        --skip-kousei) enable_kousei=false; shift ;;
-        --skip-avb) enable_avb=false; shift ;;
+        --skip-photos-spoof) enable_photos_spoof=false; shift ;;
+        --skip-secure-flag) enable_secure_flag=false; shift ;;
         --keep-workdir) keep_workdir=true; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) die "Unknown option: $1" ;;
@@ -132,9 +132,23 @@ export PATH="$TOOLS_DIR:$PATH"
 mods "Reading payload manifest"
 partition_listing="$($PAYLOAD_EXTRACT list "$payload_input")" || die "Unable to read payload manifest"
 mapfile -t payload_partitions < <(
-    tr ',' '\n' <<< "$partition_listing" \
-        | sed -n -E 's/^[[:space:]]*([A-Za-z0-9_]+)[[:space:]]*\(.*/\1/p' \
-        | sort -u
+    awk '
+        /^[[:space:]]*[A-Za-z0-9_.-]+[[:space:]]+[0-9.]+[[:space:]]+(B|KB|MB|GB|TB)[[:space:]]+[0-9]+[[:space:]]*$/ {
+            print $1
+            next
+        }
+        {
+            count = split($0, entries, ",")
+            for (i = 1; i <= count; i++) {
+                entry = entries[i]
+                sub(/^[[:space:]]*/, "", entry)
+                if (entry ~ /^[A-Za-z0-9_.-]+[[:space:]]*\(/) {
+                    sub(/[[:space:]]*\(.*/, "", entry)
+                    print entry
+                }
+            }
+        }
+    ' <<< "$partition_listing" | sort -u
 )
 [[ ${#payload_partitions[@]} -gt 0 ]] || die "No partitions found in payload"
 
@@ -147,17 +161,11 @@ has_partition() {
 }
 
 has_partition system || die "Payload has no system partition"
+has_partition system_ext || die "Payload has no system_ext partition"
 has_partition my_product || die "Payload has no my_product partition"
+has_partition my_stock || die "Payload has no my_stock partition"
 
-selected=()
-for part in "${payload_partitions[@]}"; do
-    case "$part" in
-        system|system_ext|product|vendor|odm|my_* ) selected+=("$part") ;;
-        boot|vendor_boot|vbmeta|vbmeta_system|vbmeta_vendor )
-            [[ "$enable_avb" == true ]] && selected+=("$part")
-            ;;
-    esac
-done
+selected=(system system_ext my_product my_stock)
 
 partition_csv="$(IFS=,; printf '%s' "${selected[*]}")"
 mods "Extracting selected payload partitions"
@@ -171,10 +179,6 @@ for image in "$RAW_DIR"/*.img; do
     [[ -f "$image" ]] || continue
     part="$(basename "$image" .img)"
     ORIGINAL_SIZE["$part"]="$(stat -c '%s' "$image")"
-    case "$part" in
-        boot|vendor_boot|vbmeta|vbmeta_system|vbmeta_vendor) continue ;;
-    esac
-
     fs="$($GETTYPE -i "$image" 2>/dev/null || true)"
     case "$fs" in
         ext)
@@ -213,19 +217,14 @@ if [[ "$enable_youtube" == true ]]; then
     bash "$ROOT_DIR/bin/package/YOUTUBE_MORPHE/update.sh"
 fi
 
-if [[ "$enable_kousei" == true ]]; then
-    mods "Applying Kousei framework patches"
+if [[ "$enable_secure_flag" == true ]]; then
+    mods "Applying secure-flag patch"
     bash "$ROOT_DIR/bin/package/KouseiPatcher/secure_flag_patch.sh"
-    bash "$ROOT_DIR/bin/package/KouseiPatcher/update.sh"
 fi
 
-if [[ "$enable_avb" == true && -d "$IMAGES_DIR/vendor" ]]; then
-    mods "Removing AVB flags from vendor fstab"
-    if disable_avb_verify "$IMAGES_DIR/vendor"; then
-        mark_modified vendor
-    else
-        warn "No AVB fstab flags changed in vendor"
-    fi
+if [[ "$enable_photos_spoof" == true ]]; then
+    mods "Applying Google Photos spoof"
+    bash "$ROOT_DIR/bin/package/KouseiPatcher/update.sh"
 fi
 
 repack_partition() {
@@ -236,13 +235,6 @@ repack_partition() {
     local fs="${FS_TYPE[$part]:-}"
     local fs_config="$CONFIG_DIR/${part}_fs_config"
     local file_contexts="$CONFIG_DIR/${part}_file_contexts"
-    local fs_options="$CONFIG_DIR/${part}_fs_options"
-    local erofs_uuid=""
-    local erofs_compression="-zlz4hc"
-    local erofs_cluster=""
-    local parsed_compression=""
-    local parsed_cluster=""
-    local -a erofs_args=()
 
     [[ -d "$tree" ]] || die "Modified partition tree is missing: $part"
     [[ "$original_size" -gt 0 ]] || die "Original size is unknown for $part"
@@ -260,20 +252,7 @@ repack_partition() {
                 || die "Failed to repack $part as EXT4"
             ;;
         EROFS)
-            if [[ -f "$fs_options" ]]; then
-                erofs_uuid="$(sed -n -E 's/^Filesystem UUID:[[:space:]]*([^[:space:]]+).*/\1/p' "$fs_options" | head -n 1)"
-                parsed_compression="$(sed -n -E 's/^mkfs\.erofs options:[[:space:]]+(-z[^[:space:]]+).*/\1/p' "$fs_options" | head -n 1)"
-                parsed_cluster="$(sed -n -E 's/^mkfs\.erofs options:.* -C ([0-9]+).*/\1/p' "$fs_options" | head -n 1)"
-                [[ -n "$parsed_compression" ]] && erofs_compression="$parsed_compression"
-                [[ -n "$parsed_cluster" ]] && erofs_cluster="$parsed_cluster"
-            else
-                erofs_cluster="16384"
-            fi
-
-            erofs_args=(--quiet "$erofs_compression" -T 0)
-            [[ -n "$erofs_cluster" ]] && erofs_args+=(-C "$erofs_cluster")
-            [[ -n "$erofs_uuid" ]] && erofs_args+=(-U "$erofs_uuid")
-            "$MKFS_EROFS" "${erofs_args[@]}" --mount-point "/$part" \
+            "$MKFS_EROFS" --quiet -zlz4hc,9 -C 16384 --mount-point "$part" \
                 --fs-config-file="$fs_config" --file-contexts="$file_contexts" \
                 "$output" "$tree" >/dev/null \
                 || die "Failed to repack $part as EROFS"
@@ -288,22 +267,21 @@ repack_partition() {
 }
 
 mapfile -t modified_partitions < <(sort -u "$PATCH_STATE_DIR/modified_partitions")
-[[ ${#modified_partitions[@]} -gt 0 || "$enable_avb" == true ]] || die "No partition was modified"
+[[ ${#modified_partitions[@]} -gt 0 ]] || die "No partition was modified"
 for part in "${modified_partitions[@]}"; do
+    case "$part" in
+        system|system_ext|my_product|my_stock) ;;
+        *) die "Patch unexpectedly modified a partition outside fast mode: $part" ;;
+    esac
     repack_partition "$part"
 done
-
-if [[ "$enable_avb" == true ]]; then
-    mods "Applying full DISABLE_AVB flow"
-    bash "$ROOT_DIR/bin/package/DISABLE_AVB/DISABLEavb.sh" "$output_dir"
-fi
 
 report="$output_dir/patch-report.txt"
 {
     printf 'Input: %s\n' "$payload_input"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
-    printf 'Debloat: %s\nYouTube Morphe: %s\nKousei: %s\nDISABLE_AVB: %s\n' \
-        "$enable_debloat" "$enable_youtube" "$enable_kousei" "$enable_avb"
+    printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\n' \
+        "$enable_debloat" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag"
     printf '\nOutput images:\n'
     for image in "$output_dir"/*.img; do
         [[ -f "$image" ]] || continue
@@ -313,4 +291,3 @@ report="$output_dir/patch-report.txt"
 } > "$report"
 
 mods "Patch completed: $output_dir"
-warn "Flash modified vbmeta/boot images only if you understand the device recovery path"

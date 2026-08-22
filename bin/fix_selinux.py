@@ -28,6 +28,16 @@ MAP_RULE_B = {
 }
 
 
+def escape_non_ascii(value):
+    """Encode Unicode as PCRE byte escapes accepted by Android file_contexts."""
+    return "".join(
+        char
+        if ord(char) < 128
+        else "".join(f"\\x{byte:02X}" for byte in char.encode("utf-8"))
+        for char in value
+    )
+
+
 def check_lnk(p):
     if os.name == "nt" and not os.path.isdir(p):
         try:
@@ -67,7 +77,8 @@ def load_db(f_fs, f_ctx):
                 if line.strip() and not line.startswith("#"):
                     parts = line.strip().split()
                     if len(parts) >= 2:
-                        d_ctx[parts[0].replace(r"\@", "@")] = parts[1]
+                        ctx_path = parts[0].replace(r"\@", "@")
+                        d_ctx[escape_non_ascii(ctx_path)] = parts[1]
     return d_fs, d_ctx
 
 
@@ -129,6 +140,7 @@ def main(d_path, f_fs, f_ctx):
             print(f"[FS] - Added: {fs_path} | UID: 0 | GID: {gid} | Mode: {mode}{log_lnk}")
 
         ctx_path = a_path if is_virt and a_path.endswith("(/.*)?") else re.escape(a_path).replace("\\-", "-")
+        ctx_path = escape_non_ascii(ctx_path)
         if ctx_path in db_ctx:
             out_ctx[ctx_path] = db_ctx[ctx_path]
         else:
@@ -143,17 +155,25 @@ def main(d_path, f_fs, f_ctx):
             c_ctx += 1
             print(f"[SELINUX] - Added: {ctx_path} -> Context: {assigned}")
 
-    catch_all = f"/{p_name}(/.*)?"
-    if catch_all not in out_ctx:
-        out_ctx[catch_all] = fallback
-        c_ctx += 1
-        print(f"[SELINUX] - Added: {catch_all} -> Context: {fallback}")
+    # Preserve the extractor's rule order.  In particular, moving a generic
+    # catch-all such as /system(/.*)? ahead of specific rules changes the
+    # labels selected by libselinux and can make a rebuilt EROFS image much
+    # larger.  Existing (including stale) entries are harmless; append only
+    # metadata for newly created paths.
+    ordered_fs = list(db_fs)
+    ordered_fs.extend(sorted(key for key in out_fs if key not in db_fs))
+    ordered_ctx = list(db_ctx)
+    ordered_ctx.extend(sorted(key for key in out_ctx if key not in db_ctx))
 
     with open(f_fs, "w", encoding="utf-8", newline="\n") as f:
-        f.writelines(f"{k} {' '.join(v)}\n" for k, v in sorted(out_fs.items()))
+        for key in ordered_fs:
+            values = db_fs[key] if key in db_fs else out_fs[key]
+            f.write(f"{key} {' '.join(values)}\n")
 
     with open(f_ctx, "w", encoding="utf-8", newline="\n") as f:
-        f.writelines(f"{k} {v}\n" for k, v in sorted(out_ctx.items()))
+        for key in ordered_ctx:
+            value = db_ctx[key] if key in db_ctx else out_ctx[key]
+            f.write(f"{key} {value}\n")
 
     print(f"\n[INFO] - Success: {c_fs} FS entries and {c_ctx} Context entries for '{p_name}'.")
 

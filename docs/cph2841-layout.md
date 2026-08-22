@@ -9,4 +9,4 @@ Reference layout verified from an unpacked Android 16 / SDK 36 payload:
 - Init scripts: `/system/system/etc/init` in the extracted tree, mounted as `/system/etc/init`.
 - OPlus partitions such as `my_product`, `my_stock`, `my_region`, and `odm` are independent EROFS images rather than directories owned by `system.img`.
 
-The source images use deterministic EROFS settings (`-T 0`, LZ4HC, a 16 KiB cluster for the modified partitions, per-partition UUIDs, and mount points beginning with `/`). `start-oplus.sh` reads these values from each extracted `_fs_options` file instead of replacing them with generic defaults.
+The source images use EROFS with per-partition build options. Modified images are rebuilt with `lz4hc,9` compression and 16 KiB physical clusters to keep them within their original partition sizes.
