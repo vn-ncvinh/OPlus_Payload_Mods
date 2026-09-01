@@ -6,6 +6,9 @@ source "$ROOT_DIR/functions.sh"
 HMA_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 output_dir="${1:-}"
 [[ -n "$output_dir" && -d "$output_dir" ]] || die "HMATools requires an output directory"
+shift
+parts=("$@")
+[[ ${#parts[@]} -gt 0 ]] || parts=(boot vendor_boot)
 
 chmod -R +x "$HMA_DIR/aosp" 2>/dev/null || true
 
@@ -64,5 +67,9 @@ patch_boot_image() {
     mods "HMATools patched $part.img"
 }
 
-patch_boot_image boot
-patch_boot_image vendor_boot
+for part in "${parts[@]}"; do
+    case "$part" in
+        boot|vendor_boot) patch_boot_image "$part" ;;
+        *) die "HMATools does not support partition: $part" ;;
+    esac
+done

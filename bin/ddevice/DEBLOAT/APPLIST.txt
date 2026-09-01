@@ -52,4 +52,3 @@ INOnePlusStore
 OPBreathMode
 OPForum
 heytapbook
-LockAssistant

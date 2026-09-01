@@ -23,6 +23,7 @@ Options:
   --skip-youtube-morphe         Skip YouTube Morphe integration
   --skip-photos-spoof           Skip Google Photos Pixel XL spoof
   --skip-secure-flag            Skip secure-flag/screen-capture bypass
+  --skip-avb                    Skip vendor_boot ramdisk AVB patch
   --keep-workdir                Keep temporary extracted files
   -h, --help                    Show this help
 EOF
@@ -37,6 +38,7 @@ enable_debloat=true
 enable_youtube=true
 enable_photos_spoof=true
 enable_secure_flag=true
+enable_avb=true
 keep_workdir=false
 
 while [[ $# -gt 0 ]]; do
@@ -57,6 +59,7 @@ while [[ $# -gt 0 ]]; do
         --skip-youtube-morphe) enable_youtube=false; shift ;;
         --skip-photos-spoof) enable_photos_spoof=false; shift ;;
         --skip-secure-flag) enable_secure_flag=false; shift ;;
+        --skip-avb) enable_avb=false; shift ;;
         --keep-workdir) keep_workdir=true; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) die "Unknown option: $1" ;;
@@ -166,6 +169,10 @@ has_partition my_product || die "Payload has no my_product partition"
 has_partition my_stock || die "Payload has no my_stock partition"
 
 selected=(system system_ext my_product my_stock)
+if [[ "$enable_avb" == true ]]; then
+    has_partition vendor_boot || die "Payload has no vendor_boot partition"
+    selected+=(vendor_boot)
+fi
 
 partition_csv="$(IFS=,; printf '%s' "${selected[*]}")"
 mods "Extracting selected payload partitions"
@@ -179,6 +186,7 @@ for image in "$RAW_DIR"/*.img; do
     [[ -f "$image" ]] || continue
     part="$(basename "$image" .img)"
     ORIGINAL_SIZE["$part"]="$(stat -c '%s' "$image")"
+    [[ "$part" == vendor_boot ]] && continue
     fs="$($GETTYPE -i "$image" 2>/dev/null || true)"
     case "$fs" in
         ext)
@@ -267,7 +275,7 @@ repack_partition() {
 }
 
 mapfile -t modified_partitions < <(sort -u "$PATCH_STATE_DIR/modified_partitions")
-[[ ${#modified_partitions[@]} -gt 0 ]] || die "No partition was modified"
+[[ ${#modified_partitions[@]} -gt 0 || "$enable_avb" == true ]] || die "No partition was modified"
 for part in "${modified_partitions[@]}"; do
     case "$part" in
         system|system_ext|my_product|my_stock) ;;
@@ -276,12 +284,17 @@ for part in "${modified_partitions[@]}"; do
     repack_partition "$part"
 done
 
+if [[ "$enable_avb" == true ]]; then
+    mods "Removing AVB flags from vendor_boot ramdisk"
+    bash "$ROOT_DIR/bin/package/DISABLE_AVB/HMATools/start" "$output_dir" vendor_boot
+fi
+
 report="$output_dir/patch-report.txt"
 {
     printf 'Input: %s\n' "$payload_input"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
-    printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\n' \
-        "$enable_debloat" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag"
+    printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nVendor boot AVB patch: %s\n' \
+        "$enable_debloat" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag" "$enable_avb"
     printf '\nOutput images:\n'
     for image in "$output_dir"/*.img; do
         [[ -f "$image" ]] || continue
@@ -291,3 +304,4 @@ report="$output_dir/patch-report.txt"
 } > "$report"
 
 mods "Patch completed: $output_dir"
+[[ "$enable_avb" == false ]] || warn "Flash the patched vendor_boot.img together with the modified filesystem images"
