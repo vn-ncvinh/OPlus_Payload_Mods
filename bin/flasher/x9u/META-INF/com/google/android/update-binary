@@ -1,32 +1,27 @@
 #!/system/bin/sh
 
 # OPPO Find X9 Ultra modded recovery installer.
-# Resizes physical super, preserves the live userdata end sector, streams
-# sparse super.img without /data, and flashes OTA_FILES_HERE firmware images.
+# Streams sparse super.img directly to the existing super block device and
+# flashes OTA_FILES_HERE firmware images without modifying the GPT.
 
 OUTFD="$2"
 ZIPFILE="$3"
 UI_PATH=""
 WORKDIR="/tmp/pma110-eu-installer"
 BYNAME="/dev/block/by-name"
-DISK="/dev/block/sda"
+SUPER_DEV="$BYNAME/super"
 SUPER_ENTRY="OTA_FILES_HERE/super.img"
 WRITER_ENTRY="tools/arm64/sparse_stream_writer"
 WRITER="$WORKDIR/sparse_stream_writer"
 ZIP_STREAMER_ENTRY="tools/arm64/stored_zip_streamer"
 ZIP_STREAMER="$WORKDIR/stored_zip_streamer"
 FIRMWARE_LIST="$WORKDIR/firmware-images.txt"
-GPT_WRITTEN=0
+REQUIRED_IMAGES_ENTRY="required-images.txt"
+REQUIRED_IMAGES_LIST="$WORKDIR/required-images.txt"
 SUPER_WRITTEN=0
 FLASH_ABL=0
 
 TARGET_SUPER_BYTES=20451426304
-TARGET_SUPER_SECTORS=4993024
-CN_SUPER_SECTORS=4802560
-EXPECTED_SECTOR_SIZE=4096
-EXPECTED_SUPER_START=385772
-EXPECTED_TARGET_SUPER_END=5378795
-EXPECTED_TARGET_USERDATA_START=5378796
 
 if [ -n "$OUTFD" ] && [ -e "/proc/self/fd/$OUTFD" ]; then
     UI_PATH="/proc/self/fd/$OUTFD"
@@ -84,11 +79,7 @@ cleanup() {
 abort() {
     ui_print ""
     ui_print "ERROR: $*"
-    if [ "$GPT_WRITTEN" -eq 1 ]; then
-        ui_print "A GPT write was attempted. Do not boot Android."
-    else
-        ui_print "The GPT was not changed."
-    fi
+    ui_print "The GPT was not changed."
     [ "$SUPER_WRITTEN" -eq 1 ] && ui_print "super was written before this error."
     ui_print "Remain in recovery and review the recovery log."
     exit 1
@@ -97,13 +88,6 @@ abort() {
 is_uint() {
     case "$1" in
         ""|*[!0-9]*) return 1 ;;
-        *) return 0 ;;
-    esac
-}
-
-is_guid() {
-    case "$1" in
-        ""|*[!0-9A-Fa-f-]*) return 1 ;;
         *) return 0 ;;
     esac
 }
@@ -134,6 +118,29 @@ package_image_list() {
             }
         }' |
         sort
+}
+
+prepare_required_images() {
+    package_has_file "$REQUIRED_IMAGES_ENTRY" ||
+        abort "Missing $REQUIRED_IMAGES_ENTRY"
+    unzip -p "$ZIPFILE" "$REQUIRED_IMAGES_ENTRY" > "$REQUIRED_IMAGES_LIST" 2>/dev/null ||
+        abort "Cannot extract $REQUIRED_IMAGES_ENTRY"
+    [ -s "$REQUIRED_IMAGES_LIST" ] || abort "$REQUIRED_IMAGES_ENTRY is empty"
+
+    while IFS= read -r ENTRY || [ -n "$ENTRY" ]; do
+        case "$ENTRY" in
+            OTA_FILES_HERE/*.img) ;;
+            *) abort "Invalid required image entry: $ENTRY" ;;
+        esac
+        NAME="${ENTRY#OTA_FILES_HERE/}"
+        case "$NAME" in
+            */*|"") abort "Invalid required image entry: $ENTRY" ;;
+        esac
+        package_has_file "$ENTRY" || abort "Missing required image: $ENTRY"
+        IMAGE_SIZE="$(package_file_size "$ENTRY")"
+        is_uint "$IMAGE_SIZE" || abort "Cannot read size of $ENTRY"
+        [ "$IMAGE_SIZE" -gt 0 ] || abort "$ENTRY is empty"
+    done < "$REQUIRED_IMAGES_LIST"
 }
 
 prepare_firmware_list() {
@@ -191,7 +198,7 @@ volume_key() {
 }
 
 confirm_install() {
-    print_box "Device and GPT checks passed"
+    print_box "Package checks passed"
     ui_print "###################################"
     ui_print "#     Continue installation?      #"
     ui_print "#   Vol+ CONTINUE   Vol- CANCEL   #"
@@ -228,165 +235,13 @@ ask_flash_abl() {
 
 unmount_for_install() {
     print_box "Unmounting partitions"
-    umount /sdcard >/dev/null 2>&1
-    umount /data/user/0 >/dev/null 2>&1
-    umount /data >/dev/null 2>&1
-
     for MOUNTPOINT in /system_root /system /system_ext /vendor /product /odm; do
         umount "$MOUNTPOINT" >/dev/null 2>&1
     done
 
-    is_mounted /sdcard && abort "/sdcard is still mounted"
-    is_mounted /data && abort "/data is still mounted"
-    is_mounted /data/user/0 && abort "/data/user/0 is still mounted"
-    grep -q " /data/" /proc/mounts 2>/dev/null &&
-        abort "A filesystem below /data is still mounted"
-
     for MOUNTPOINT in /system_root /system /system_ext /vendor /product /odm; do
         is_mounted "$MOUNTPOINT" && abort "$MOUNTPOINT is still mounted"
     done
-}
-
-read_gpt() {
-    GPT_PRINT="$WORKDIR/gpt-print.txt"
-    SUPER_INFO="$WORKDIR/super-info.txt"
-    USERDATA_INFO="$WORKDIR/userdata-info.txt"
-
-    sgdisk --print "$DISK" > "$GPT_PRINT" 2>&1 || abort "Cannot read GPT"
-    sgdisk --info=14 "$DISK" > "$SUPER_INFO" 2>&1 ||
-        abort "Cannot read partition 14"
-    sgdisk --info=15 "$DISK" > "$USERDATA_INFO" 2>&1 ||
-        abort "Cannot read partition 15"
-
-    SECTOR_SIZE="$(sed -n 's/^Sector size (logical\/physical): \([0-9][0-9]*\)\/.*/\1/p' "$GPT_PRINT")"
-    SUPER_START="$(sed -n 's/^First sector: \([0-9][0-9]*\).*/\1/p' "$SUPER_INFO")"
-    SUPER_END="$(sed -n 's/^Last sector: \([0-9][0-9]*\).*/\1/p' "$SUPER_INFO")"
-    SUPER_TYPE="$(sed -n 's/^Partition GUID code: \([0-9A-Fa-f-]*\).*/\1/p' "$SUPER_INFO")"
-    SUPER_GUID="$(sed -n 's/^Partition unique GUID: \([0-9A-Fa-f-]*\).*/\1/p' "$SUPER_INFO")"
-    SUPER_ATTRS="$(sed -n 's/^Attribute flags: \([0-9A-Fa-f]*\).*/\1/p' "$SUPER_INFO")"
-    SUPER_NAME="$(sed -n "s/^Partition name: '\([^']*\)'.*/\1/p" "$SUPER_INFO")"
-
-    USERDATA_START="$(sed -n 's/^First sector: \([0-9][0-9]*\).*/\1/p' "$USERDATA_INFO")"
-    USERDATA_END="$(sed -n 's/^Last sector: \([0-9][0-9]*\).*/\1/p' "$USERDATA_INFO")"
-    USERDATA_TYPE="$(sed -n 's/^Partition GUID code: \([0-9A-Fa-f-]*\).*/\1/p' "$USERDATA_INFO")"
-    USERDATA_GUID="$(sed -n 's/^Partition unique GUID: \([0-9A-Fa-f-]*\).*/\1/p' "$USERDATA_INFO")"
-    USERDATA_ATTRS="$(sed -n 's/^Attribute flags: \([0-9A-Fa-f]*\).*/\1/p' "$USERDATA_INFO")"
-    USERDATA_NAME="$(sed -n "s/^Partition name: '\([^']*\)'.*/\1/p" "$USERDATA_INFO")"
-
-    for VALUE in "$SECTOR_SIZE" "$SUPER_START" "$SUPER_END" "$USERDATA_START" "$USERDATA_END"; do
-        is_uint "$VALUE" || abort "Failed parsing GPT sector values"
-    done
-    is_guid "$SUPER_TYPE" || abort "Failed parsing super type GUID"
-    is_guid "$SUPER_GUID" || abort "Failed parsing super unique GUID"
-    is_guid "$USERDATA_TYPE" || abort "Failed parsing userdata type GUID"
-    is_guid "$USERDATA_GUID" || abort "Failed parsing userdata unique GUID"
-
-    [ "$SECTOR_SIZE" -eq "$EXPECTED_SECTOR_SIZE" ] ||
-        abort "Sector size is $SECTOR_SIZE, expected $EXPECTED_SECTOR_SIZE"
-    [ "$SUPER_START" -eq "$EXPECTED_SUPER_START" ] ||
-        abort "super starts at $SUPER_START, expected $EXPECTED_SUPER_START"
-    [ "$SUPER_NAME" = "super" ] || abort "Partition 14 is not super"
-    [ "$USERDATA_NAME" = "userdata" ] || abort "Partition 15 is not userdata"
-    [ "$SUPER_ATTRS" = "0000000000000000" ] ||
-        abort "super has unexpected GPT attributes"
-    [ "$USERDATA_ATTRS" = "0000000000000000" ] ||
-        abort "userdata has unexpected GPT attributes"
-    [ "$SUPER_TYPE" = "89A12DE1-5E41-4CB3-8B4C-B1441EB5DA38" ] ||
-        abort "Unexpected super type GUID"
-    [ "$USERDATA_TYPE" = "1B81E7E6-F50D-419B-A739-2AEEF8DA3335" ] ||
-        abort "Unexpected userdata type GUID"
-    [ "$USERDATA_START" -eq $((SUPER_END + 1)) ] ||
-        abort "super and userdata are not adjacent"
-
-    CURRENT_SUPER_SECTORS=$((SUPER_END - SUPER_START + 1))
-    TARGET_SUPER_END=$((SUPER_START + TARGET_SUPER_SECTORS - 1))
-    TARGET_USERDATA_START=$((TARGET_SUPER_END + 1))
-    TARGET_USERDATA_SECTORS=$((USERDATA_END - TARGET_USERDATA_START + 1))
-
-    [ "$TARGET_SUPER_END" -eq "$EXPECTED_TARGET_SUPER_END" ] ||
-        abort "Internal super boundary calculation failed"
-    [ "$TARGET_USERDATA_START" -eq "$EXPECTED_TARGET_USERDATA_START" ] ||
-        abort "Internal userdata boundary calculation failed"
-    [ "$TARGET_USERDATA_SECTORS" -gt 0 ] || abort "userdata is too small"
-}
-
-validate_gpt_resize() {
-    if [ "$CURRENT_SUPER_SECTORS" -eq "$TARGET_SUPER_SECTORS" ]; then
-        [ "$USERDATA_START" -eq "$TARGET_USERDATA_START" ] ||
-            abort "Target-size super has an unexpected userdata boundary"
-        return 0
-    fi
-
-    [ "$CURRENT_SUPER_SECTORS" -eq "$CN_SUPER_SECTORS" ] ||
-        abort "Unsupported current super sector count: $CURRENT_SUPER_SECTORS"
-
-    DRYRUN_LOG="$WORKDIR/gpt-dry-run.log"
-    sgdisk --pretend \
-        --delete=15 \
-        --delete=14 \
-        --new=14:$SUPER_START:$TARGET_SUPER_END \
-        --typecode=14:$SUPER_TYPE \
-        --partition-guid=14:$SUPER_GUID \
-        --change-name=14:super \
-        --new=15:$TARGET_USERDATA_START:$USERDATA_END \
-        --typecode=15:$USERDATA_TYPE \
-        --partition-guid=15:$USERDATA_GUID \
-        --change-name=15:userdata \
-        --print \
-        --verify \
-        "$DISK" > "$DRYRUN_LOG" 2>&1 ||
-        abort "GPT dry run failed"
-
-    grep -q "No problems found" "$DRYRUN_LOG" ||
-        abort "GPT dry-run verification failed"
-}
-
-resize_gpt_if_needed() {
-    if [ "$CURRENT_SUPER_SECTORS" -eq "$TARGET_SUPER_SECTORS" ]; then
-        print_box "Super size already correct"
-        return 0
-    fi
-
-    print_box "Resizing physical super"
-    print_box "userdata end: $USERDATA_END"
-
-    WRITE_LOG="$WORKDIR/gpt-write.log"
-    GPT_WRITTEN=1
-    sgdisk \
-        --delete=15 \
-        --delete=14 \
-        --new=14:$SUPER_START:$TARGET_SUPER_END \
-        --typecode=14:$SUPER_TYPE \
-        --partition-guid=14:$SUPER_GUID \
-        --change-name=14:super \
-        --new=15:$TARGET_USERDATA_START:$USERDATA_END \
-        --typecode=15:$USERDATA_TYPE \
-        --partition-guid=15:$USERDATA_GUID \
-        --change-name=15:userdata \
-        "$DISK" > "$WRITE_LOG" 2>&1 ||
-        abort "GPT write failed"
-
-    sync
-
-    sgdisk --info=14 "$DISK" > "$WORKDIR/super-after.txt" 2>&1 ||
-        abort "Cannot verify resized super"
-    sgdisk --info=15 "$DISK" > "$WORKDIR/userdata-after.txt" 2>&1 ||
-        abort "Cannot verify resized userdata"
-    sgdisk --verify "$DISK" > "$WORKDIR/gpt-verify-after.log" 2>&1 ||
-        abort "Final GPT verification failed"
-
-    AFTER_SUPER_END="$(sed -n 's/^Last sector: \([0-9][0-9]*\).*/\1/p' "$WORKDIR/super-after.txt")"
-    AFTER_USERDATA_START="$(sed -n 's/^First sector: \([0-9][0-9]*\).*/\1/p' "$WORKDIR/userdata-after.txt")"
-    AFTER_USERDATA_END="$(sed -n 's/^Last sector: \([0-9][0-9]*\).*/\1/p' "$WORKDIR/userdata-after.txt")"
-
-    [ "$AFTER_SUPER_END" = "$TARGET_SUPER_END" ] ||
-        abort "Resized super end verification failed"
-    [ "$AFTER_USERDATA_START" = "$TARGET_USERDATA_START" ] ||
-        abort "Resized userdata start verification failed"
-    [ "$AFTER_USERDATA_END" = "$USERDATA_END" ] ||
-        abort "userdata end was not preserved"
-
-    print_box "GPT resize completed"
 }
 
 resolve_targets() {
@@ -463,8 +318,11 @@ prepare_streamers() {
 
 flash_super_image() {
     package_has_file "$SUPER_ENTRY" || abort "Missing $SUPER_ENTRY"
-
-    SUPER_OFFSET_BYTES=$((SUPER_START * SECTOR_SIZE))
+    [ -b "$SUPER_DEV" ] || abort "$SUPER_DEV is not a block device"
+    SUPER_DEVICE_BYTES="$(blockdev --getsize64 "$SUPER_DEV" 2>/dev/null)"
+    is_uint "$SUPER_DEVICE_BYTES" || abort "Cannot read size of $SUPER_DEV"
+    [ "$SUPER_DEVICE_BYTES" -ge "$TARGET_SUPER_BYTES" ] ||
+        abort "Existing super is too small: $SUPER_DEVICE_BYTES < $TARGET_SUPER_BYTES"
 
     FIFO="$WORKDIR/super.sparse.fifo"
     rm -f "$FIFO"
@@ -483,7 +341,7 @@ flash_super_image() {
     [ -n "$UI_PATH" ] && WRITER_UI_FD="$OUTFD"
 
     SUPER_WRITTEN=1
-    "$WRITER" "$DISK" "$SUPER_OFFSET_BYTES" "$TARGET_SUPER_BYTES" "$WRITER_UI_FD" \
+    "$WRITER" "$SUPER_DEV" 0 "$TARGET_SUPER_BYTES" "$WRITER_UI_FD" \
         < "$FIFO" > "$WORKDIR/super-writer.log" 2>&1
     WRITER_STATUS=$?
 
@@ -507,17 +365,11 @@ ui_print "#       Recovery Super Flasher    #"
 ui_print "###################################"
 ui_print ""
 
-for TOOL in sgdisk unzip awk sed grep sort basename readlink blockdev \
+for TOOL in unzip awk sed grep sort basename blockdev \
     umount mkdir chmod mkfifo sync getprop getevent rm; do
     command -v "$TOOL" >/dev/null 2>&1 ||
         abort "$TOOL is missing from recovery"
 done
-
-case "$ZIPFILE" in
-    /data/*|/sdcard/*|/storage/emulated/*|/mnt/runtime/*)
-        abort "Use ADB sideload or USB OTG, not internal storage"
-        ;;
-esac
 
 [ -f "$ZIPFILE" ] || abort "Package ZIP is unavailable"
 
@@ -531,34 +383,19 @@ case "$PRJ_ID" in
         ;;
 esac
 
-SUPER_DEV="$(readlink -f "$BYNAME/super" 2>/dev/null)"
-USERDATA_DEV="$(readlink -f "$BYNAME/userdata" 2>/dev/null)"
-[ "$SUPER_DEV" = "/dev/block/sda14" ] ||
-    abort "super is $SUPER_DEV, expected /dev/block/sda14"
-[ "$USERDATA_DEV" = "/dev/block/sda15" ] ||
-    abort "userdata is $USERDATA_DEV, expected /dev/block/sda15"
-[ -b "$DISK" ] || abort "$DISK is not a block device"
-
 rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR" || abort "Cannot create $WORKDIR"
 
-package_has_file "$SUPER_ENTRY" || abort "Missing $SUPER_ENTRY"
-package_has_file "OTA_FILES_HERE/boot.img" || abort "Missing boot.img"
-package_has_file "OTA_FILES_HERE/vendor_boot.img" || abort "Missing vendor_boot.img"
-package_has_file "OTA_FILES_HERE/vbmeta.img" || abort "Missing vbmeta.img"
-package_has_file "OTA_FILES_HERE/abl.img" || abort "Missing abl.img"
 prepare_streamers
+prepare_required_images
 prepare_firmware_list
 
 set_progress 0.02
 show_progress 0.15 20
 
-read_gpt
-validate_gpt_resize
 confirm_install
 ask_flash_abl
 unmount_for_install
-resize_gpt_if_needed
 
 set_progress 0.15
 show_progress 0.45 240
@@ -614,8 +451,6 @@ ui_print "###################################"
 ui_print "#       Installation complete     #"
 ui_print "###################################"
 ui_print ""
-print_box "Do not boot Android yet"
-print_box "Reboot directly to recovery"
 print_box "Super: $TARGET_SUPER_BYTES bytes"
 print_box "Format Data before Android"
 

@@ -36,7 +36,8 @@ Use `./start-oplus.sh --help` for patch toggles and output options. The output
 directory receives one `X9U_Mods_Recovery.zip`. It contains firmware from the
 input payload and a sparse `super.img` assembled from untouched payload images,
 the patched images, the stock Thai `my_company`, and the debloated Thai
-`my_preload` donor.
+`my_preload` donor. Each build also generates `required-images.txt`; the
+installer verifies every image listed there before asking for flash confirmation.
 
 Use `--skip-photos-spoof` and `--skip-secure-flag` to disable the two framework patches independently.
 
@@ -49,7 +50,7 @@ The current paths and patch anchors were checked against an unpacked CPH2841 And
 ## Warning
 
 The generated installer is only for Find X9 Ultra project IDs
-`25021`/`25022`/`25211` with the expected `sda14` super and `sda15` userdata GPT
-layout. It may resize the physical super partition and requires formatting
-data. Keep a tested recovery/EDL path and review the on-device confirmation
-screen before flashing.
+`25021`/`25022`/`25211`. It never resizes or otherwise modifies the GPT and
+requires an existing `super` block device of at least 20,451,426,304 bytes.
+Keep a tested recovery/EDL path and review the on-device confirmation screen
+before flashing.

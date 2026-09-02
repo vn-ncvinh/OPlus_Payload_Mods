@@ -415,11 +415,17 @@ report="$PACKAGE_DIR/patch-report.txt"
     (cd "$DONOR_DIR" && sha256sum -c SHA256SUMS)
 } > "$report"
 
+(
+    cd "$PACKAGE_DIR"
+    find OTA_FILES_HERE -maxdepth 1 -type f -name '*.img' -print | sort > required-images.txt
+)
+[[ -s "$PACKAGE_DIR/required-images.txt" ]] || die "No required image list was generated"
+
 zip_path="$WORK_DIR/X9U_Mods_Recovery.zip"
 mods "Creating recovery ZIP (stored entries)"
 (
     cd "$PACKAGE_DIR"
-    zip -0 -q -r "$zip_path" META-INF OTA_FILES_HERE tools patch-report.txt
+    zip -0 -q -r "$zip_path" META-INF OTA_FILES_HERE tools patch-report.txt required-images.txt
 ) || die "Failed to create recovery ZIP"
 [[ -s "$zip_path" ]] || die "Recovery ZIP is empty"
 
