@@ -521,21 +521,15 @@ esac
 
 [ -f "$ZIPFILE" ] || abort "Package ZIP is unavailable"
 
-MODEL="$(getprop ro.product.model 2>/dev/null)"
 PRJ_ID="$(getprop ro.boot.prjname 2>/dev/null)"
 case "$PRJ_ID" in
-    25021|25022)
+    25021|25022|25211)
         print_box "Project ID $PRJ_ID accepted"
         ;;
     *)
         abort "Unsupported project ID: $PRJ_ID"
         ;;
 esac
-
-FLASH_LOCKED="$(getprop ro.boot.flash.locked 2>/dev/null)"
-[ "$FLASH_LOCKED" = "0" ] ||
-    abort "Bootloader must be unlocked (ro.boot.flash.locked=$FLASH_LOCKED)"
-print_box "Bootloader unlocked"
 
 SUPER_DEV="$(readlink -f "$BYNAME/super" 2>/dev/null)"
 USERDATA_DEV="$(readlink -f "$BYNAME/userdata" 2>/dev/null)"

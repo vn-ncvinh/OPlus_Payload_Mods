@@ -48,8 +48,8 @@ The current paths and patch anchors were checked against an unpacked CPH2841 And
 
 ## Warning
 
-The generated installer is only for unlocked Find X9 Ultra project IDs
-`25021`/`25022` with the expected `sda14` super and `sda15` userdata GPT
+The generated installer is only for Find X9 Ultra project IDs
+`25021`/`25022`/`25211` with the expected `sda14` super and `sda15` userdata GPT
 layout. It may resize the physical super partition and requires formatting
 data. Keep a tested recovery/EDL path and review the on-device confirmation
 screen before flashing.
