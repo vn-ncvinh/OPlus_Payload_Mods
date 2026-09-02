@@ -95,6 +95,40 @@ is_uint() {
     esac
 }
 
+normalize_uint() {
+    _UINT_NORMALIZED="$1"
+    while [ "${_UINT_NORMALIZED#0}" != "$_UINT_NORMALIZED" ]; do
+        _UINT_NORMALIZED="${_UINT_NORMALIZED#0}"
+    done
+    [ -n "$_UINT_NORMALIZED" ] || _UINT_NORMALIZED=0
+    printf '%s\n' "$_UINT_NORMALIZED"
+}
+
+uint_is_positive() {
+    _UINT_POSITIVE="$(normalize_uint "$1")"
+    [ "$_UINT_POSITIVE" != 0 ]
+}
+
+# Compare unsigned decimal strings without relying on the recovery shell's
+# integer width. Some recoveries overflow test(1) above 2 GiB or 4 GiB.
+uint_le() {
+    _UINT_LEFT="$(normalize_uint "$1")"
+    _UINT_RIGHT="$(normalize_uint "$2")"
+
+    [ ${#_UINT_LEFT} -lt ${#_UINT_RIGHT} ] && return 0
+    [ ${#_UINT_LEFT} -gt ${#_UINT_RIGHT} ] && return 1
+
+    while [ -n "$_UINT_LEFT" ]; do
+        _UINT_LEFT_DIGIT="${_UINT_LEFT%"${_UINT_LEFT#?}"}"
+        _UINT_RIGHT_DIGIT="${_UINT_RIGHT%"${_UINT_RIGHT#?}"}"
+        [ "$_UINT_LEFT_DIGIT" -lt "$_UINT_RIGHT_DIGIT" ] && return 0
+        [ "$_UINT_LEFT_DIGIT" -gt "$_UINT_RIGHT_DIGIT" ] && return 1
+        _UINT_LEFT="${_UINT_LEFT#?}"
+        _UINT_RIGHT="${_UINT_RIGHT#?}"
+    done
+    return 0
+}
+
 is_mounted() {
     grep -q " $1 " /proc/mounts 2>/dev/null
 }
@@ -120,7 +154,7 @@ prepare_device_profile() {
     [ -n "$DEVICE_DISPLAY" ] || abort "Device profile has no display name"
     [ -n "$SUPPORTED_PROJECT_IDS" ] || abort "Device profile has no project IDs"
     is_uint "$TARGET_SUPER_BYTES" || abort "Device profile has invalid super size"
-    [ "$TARGET_SUPER_BYTES" -gt 0 ] || abort "Device profile has empty super size"
+    uint_is_positive "$TARGET_SUPER_BYTES" || abort "Device profile has empty super size"
 }
 
 package_firmware_list() {
@@ -168,7 +202,7 @@ prepare_required_images() {
         [ "$ENTRY" = "$SUPER_ENTRY" ] && continue
         IMAGE_SIZE="$(package_file_size "$ENTRY")"
         is_uint "$IMAGE_SIZE" || abort "Cannot read size of $ENTRY"
-        [ "$IMAGE_SIZE" -gt 0 ] || abort "$ENTRY is empty"
+        uint_is_positive "$IMAGE_SIZE" || abort "$ENTRY is empty"
     done < "$REQUIRED_IMAGES_LIST"
 }
 
@@ -191,7 +225,7 @@ prepare_firmware_list() {
 
         IMAGE_SIZE="$(package_file_size "$ENTRY")"
         is_uint "$IMAGE_SIZE" || abort "Cannot read size of $ENTRY"
-        [ "$IMAGE_SIZE" -gt 0 ] || abort "$ENTRY is empty"
+        uint_is_positive "$IMAGE_SIZE" || abort "$ENTRY is empty"
     done < "$FIRMWARE_LIST"
 }
 
@@ -299,13 +333,13 @@ flash_firmware_image() {
 
     IMAGE_SIZE="$(package_file_size "$ENTRY")"
     is_uint "$IMAGE_SIZE" || abort "Cannot read size of $ENTRY"
-    [ "$IMAGE_SIZE" -gt 0 ] || abort "$ENTRY is empty"
+    uint_is_positive "$IMAGE_SIZE" || abort "$ENTRY is empty"
 
     resolve_targets "$PART"
     for TARGET in $TARGETS; do
         TARGET_SIZE="$(blockdev --getsize64 "$TARGET" 2>/dev/null)"
         is_uint "$TARGET_SIZE" || abort "Cannot read size of $TARGET"
-        [ "$IMAGE_SIZE" -le "$TARGET_SIZE" ] ||
+        uint_le "$IMAGE_SIZE" "$TARGET_SIZE" ||
             abort "$NAME is larger than $TARGET"
 
         print_box "Flashing $(basename "$TARGET")"
@@ -318,13 +352,13 @@ validate_efisp_target() {
     package_has_file "$EFISP_ENTRY" || abort "Missing $EFISP_ENTRY"
     IMAGE_SIZE="$(package_file_size "$EFISP_ENTRY")"
     is_uint "$IMAGE_SIZE" || abort "Cannot read size of $EFISP_ENTRY"
-    [ "$IMAGE_SIZE" -gt 0 ] || abort "$EFISP_ENTRY is empty"
+    uint_is_positive "$IMAGE_SIZE" || abort "$EFISP_ENTRY is empty"
 
     EFISP_DEV="$BYNAME/efisp"
     [ -b "$EFISP_DEV" ] || abort "$EFISP_DEV is not a block device"
     TARGET_SIZE="$(blockdev --getsize64 "$EFISP_DEV" 2>/dev/null)"
     is_uint "$TARGET_SIZE" || abort "Cannot read size of $EFISP_DEV"
-    [ "$IMAGE_SIZE" -le "$TARGET_SIZE" ] ||
+    uint_le "$IMAGE_SIZE" "$TARGET_SIZE" ||
         abort "$EFISP_ENTRY is larger than efisp"
 }
 
@@ -369,7 +403,7 @@ flash_super_image() {
     [ -b "$SUPER_DEV" ] || abort "$SUPER_DEV is not a block device"
     SUPER_DEVICE_BYTES="$(blockdev --getsize64 "$SUPER_DEV" 2>/dev/null)"
     is_uint "$SUPER_DEVICE_BYTES" || abort "Cannot read size of $SUPER_DEV"
-    [ "$SUPER_DEVICE_BYTES" -ge "$TARGET_SUPER_BYTES" ] ||
+    uint_le "$TARGET_SUPER_BYTES" "$SUPER_DEVICE_BYTES" ||
         abort "Existing super is too small: $SUPER_DEVICE_BYTES < $TARGET_SUPER_BYTES"
 
     FIFO="$WORKDIR/super.sparse.fifo"
