@@ -79,7 +79,7 @@ while IFS= read -r -d '' apk; do
             *) die "Refusing to remove unsafe APK directory: $apk_parent" ;;
         esac
     fi
-done < <(find "$IMAGES_DIR" -type f -iname '*.apk' -ipath '*youtube*' -print0)
+done < <(find "$IMAGES_DIR/my_product" -type f -iname '*.apk' -ipath '*youtube*' -print0)
 
 my_product="$IMAGES_DIR/my_product"
 system_root="$IMAGES_DIR/system"

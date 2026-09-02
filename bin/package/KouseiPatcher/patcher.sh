@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 source "$ROOT_DIR/functions.sh"
 
-mapfile -d '' framework_jars < <(find "$IMAGES_DIR" -type f -name framework.jar -print0)
+mapfile -d '' framework_jars < <(find "$IMAGES_DIR/system" -type f -name framework.jar -print0)
 [[ ${#framework_jars[@]} -eq 1 ]] || die "Expected one framework.jar, found ${#framework_jars[@]}"
 jar_path="${framework_jars[0]}"
 temp_dir="$(mktemp -d "$WORK_DIR/kousei-framework.XXXXXX")"

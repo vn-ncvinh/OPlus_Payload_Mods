@@ -57,6 +57,9 @@ The bundled `arbextract` binary comes from
 The build stops before applying any mods when `xbl_config` reports non-zero ARB.
 
 Use `--skip-photos-spoof` and `--skip-secure-flag` to disable the two framework patches independently.
+Disabled mods no longer cause unrelated filesystem trees to be unpacked: debloat
+uses `system_ext`, `my_product`, and `my_stock`; YouTube Morphe uses `system`
+and `my_product`; both framework patches use only `system`.
 
 EROFS images are rebuilt with `lz4hc,9` compression and 16 KiB physical
 clusters. A modified logical image may grow beyond its old allocation as long

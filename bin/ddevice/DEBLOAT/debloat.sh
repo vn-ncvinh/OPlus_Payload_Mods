@@ -31,6 +31,11 @@ while IFS= read -r -d '' app_dir; do
     if [[ -n "${debloat_apps[$app_name]+x}" ]]; then
         remove_path "$app_dir"
     fi
-done < <(find "$IMAGES_DIR" -depth -type d -print0)
+done < <(
+    for part in system_ext my_product my_stock; do
+        [[ -d "$IMAGES_DIR/$part" ]] || continue
+        find "$IMAGES_DIR/$part" -depth -type d -print0
+    done
+)
 
 mods "Debloat completed"

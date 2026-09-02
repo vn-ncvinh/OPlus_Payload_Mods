@@ -346,9 +346,14 @@ python3 "$GBL_DIR/efisp-package.py" \
 declare -A FS_TYPE=()
 declare -A ORIGINAL_SIZE=()
 
-is_patch_partition() {
+needs_partition_tree() {
     case "$1" in
-        system|system_ext|my_product|my_stock) return 0 ;;
+        system)
+            [[ "$enable_youtube" == true || "$enable_secure_flag" == true || \
+                "$enable_photos_spoof" == true ]]
+            ;;
+        system_ext|my_stock) [[ "$enable_debloat" == true ]] ;;
+        my_product) [[ "$enable_debloat" == true || "$enable_youtube" == true ]] ;;
         vendor) [[ "$enable_avb" == true ]] ;;
         *) return 1 ;;
     esac
@@ -358,7 +363,7 @@ for image in "$RAW_DIR"/*.img; do
     [[ -f "$image" ]] || continue
     part="$(basename "$image" .img)"
     ORIGINAL_SIZE["$part"]="$(stat -c '%s' "$image")"
-    is_patch_partition "$part" || continue
+    needs_partition_tree "$part" || continue
     fs="$($GETTYPE -i "$image" 2>/dev/null || true)"
     case "$fs" in
         ext)
@@ -377,15 +382,23 @@ for image in "$RAW_DIR"/*.img; do
     esac
 done
 
-[[ -d "$IMAGES_DIR/system" ]] || die "system filesystem was not extracted"
-[[ -d "$IMAGES_DIR/my_product" ]] || die "my_product filesystem was not extracted"
+for part in system system_ext my_product my_stock vendor; do
+    needs_partition_tree "$part" || continue
+    [[ -d "$IMAGES_DIR/$part" ]] || die "$part filesystem was not extracted"
+done
 
-system_root="$IMAGES_DIR/system"
-[[ -d "$system_root/system/framework" ]] && system_root="$system_root/system"
-sdk_level="$(find "$system_root" -type f -name build.prop -exec sed -n 's/^ro.build.version.sdk=//p' {} + | head -n 1)"
-[[ "$sdk_level" =~ ^[0-9]+$ ]] || die "Unable to determine Android SDK level"
-export SDK_LEVEL="$sdk_level"
-info "Detected Android SDK $SDK_LEVEL"
+SDK_LEVEL="n/a"
+if [[ -d "$IMAGES_DIR/system" ]]; then
+    system_root="$IMAGES_DIR/system"
+    [[ -d "$system_root/system/framework" ]] && system_root="$system_root/system"
+    system_build_prop="$system_root/build.prop"
+    [[ -f "$system_build_prop" ]] || die "system build.prop is missing"
+    sdk_level="$(sed -n 's/^ro.build.version.sdk=//p' "$system_build_prop" | awk 'NF {print; exit}')"
+    [[ "$sdk_level" =~ ^[0-9]+$ ]] || die "Unable to determine Android SDK level"
+    SDK_LEVEL="$sdk_level"
+    info "Detected Android SDK $SDK_LEVEL"
+fi
+export SDK_LEVEL
 
 if [[ "$enable_debloat" == true ]]; then
     mods "Applying debloat"
@@ -502,12 +515,16 @@ cp -a "$FLASHER_TEMPLATE/." "$PACKAGE_DIR/"
 for part in "${payload_partitions[@]}"; do
     is_dynamic_partition "$part" && continue
     is_donor_partition "$part" && continue
-    source_image="$RAW_DIR/$part.img"
-    [[ -f "$source_image" ]] || die "Extracted payload image is missing: $part.img"
+    raw_image="$RAW_DIR/$part.img"
+    source_image="$raw_image"
+    [[ -f "$raw_image" ]] || die "Extracted payload image is missing: $part.img"
     if [[ ( "$part" == boot || "$part" == vendor_boot ) && -f "$BUILT_IMAGES_DIR/$part.img" ]]; then
         source_image="$BUILT_IMAGES_DIR/$part.img"
     fi
-    cp -f "$source_image" "$OTA_DIR/$part.img"
+    mv "$source_image" "$OTA_DIR/$part.img"
+    if [[ "$source_image" != "$raw_image" ]]; then
+        rm -f -- "$raw_image"
+    fi
 done
 
 declare -a lp_args=(

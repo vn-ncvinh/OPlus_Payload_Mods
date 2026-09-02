@@ -49,7 +49,7 @@ while IFS= read -r -d '' jar_path; do
     patched_total=$((patched_total + count))
     mods "Secure-flag patch applied to $jar_path ($count targets)"
 done < <(
-    find "$IMAGES_DIR" -type f \
+    find "$IMAGES_DIR/system" -type f \
         \( -name services.jar -o -name oplus-services.jar -o -name miui-services.jar \) \
         -print0
 )
