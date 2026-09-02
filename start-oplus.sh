@@ -11,13 +11,29 @@ GETTYPE="$TOOLS_DIR/gettype"
 EXTRACT_EROFS="$TOOLS_DIR/extract.erofs"
 MKFS_EROFS="$TOOLS_DIR/mkfs.erofs"
 MAKE_EXT4FS="$TOOLS_DIR/make_ext4fs"
+LPMAKE="$TOOLS_DIR/lpmake"
+FLASHER_TEMPLATE="$ROOT_DIR/bin/flasher/x9u"
+DONOR_DIR="$ROOT_DIR/assets/x9u/donors"
+
+SUPER_SIZE=20451426304
+SUPER_GROUP_SIZE=20447232000
+SUPER_ALIGNMENT=524288
+SUPER_ALIGNMENT_OFFSET=81920
+SUPER_METADATA_SIZE=65536
+SUPER_METADATA_SLOTS=3
+
+DYNAMIC_PARTITIONS=(
+    system system_ext product vendor odm my_product my_engineering vendor_dlkm
+    system_dlkm my_stock my_heytap my_carrier my_region my_bigball my_manifest
+)
+DONOR_PARTITIONS=(my_company my_preload)
 
 usage() {
     cat <<'EOF'
 Usage: ./start-oplus.sh <payload.bin> [options]
 
 Options:
-  --output <dir>                Output directory (default: ./output)
+  --output <dir>                Recovery ZIP output directory (default: ./output)
   --youtube-morphe-url <url>    Pin a YouTube Morphe module ZIP
   --skip-debloat                Skip debloat
   --skip-youtube-morphe         Skip YouTube Morphe integration
@@ -82,10 +98,10 @@ output_dir="$(realpath -m "$output_dir")"
 [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] \
     || die "This tool currently supports Linux/WSL x86_64 only"
 
-for tool in "$PAYLOAD_EXTRACT" "$GETTYPE" "$EXTRACT_EROFS" "$MKFS_EROFS" "$MAKE_EXT4FS"; do
+for tool in "$PAYLOAD_EXTRACT" "$GETTYPE" "$EXTRACT_EROFS" "$MKFS_EROFS" "$MAKE_EXT4FS" "$LPMAKE"; do
     [[ -x "$tool" ]] || die "Bundled tool is missing or not executable: $tool"
 done
-for command in python3 java unzip zipalign sha256sum find sed awk grep realpath; do
+for command in python3 java unzip zip zipalign sha256sum find sed awk grep realpath; do
     require_command "$command"
 done
 if command -v 7za >/dev/null 2>&1; then
@@ -99,6 +115,18 @@ if [[ "$enable_youtube" == true ]]; then
     require_command aapt
     require_command aria2c
 fi
+
+[[ -x "$FLASHER_TEMPLATE/META-INF/com/google/android/update-binary" ]] \
+    || die "X9 Ultra recovery flasher template is missing"
+[[ -x "$FLASHER_TEMPLATE/tools/arm64/sparse_stream_writer" ]] \
+    || die "X9 Ultra sparse stream writer is missing"
+[[ -x "$FLASHER_TEMPLATE/tools/arm64/stored_zip_streamer" ]] \
+    || die "X9 Ultra ZIP streamer is missing"
+[[ -f "$DONOR_DIR/SHA256SUMS" ]] || die "X9 Ultra donor checksums are missing"
+(
+    cd "$DONOR_DIR"
+    sha256sum -c SHA256SUMS
+) >/dev/null || die "X9 Ultra donor image is missing, is an LFS pointer, or has the wrong checksum"
 
 if [[ -e "$output_dir" ]]; then
     [[ -d "$output_dir" ]] || die "Output path is not a directory: $output_dir"
@@ -114,7 +142,11 @@ RAW_DIR="$WORK_DIR/raw"
 IMAGES_DIR="$WORK_DIR/images"
 CONFIG_DIR="$IMAGES_DIR/config"
 PATCH_STATE_DIR="$WORK_DIR/state"
-mkdir -p "$RAW_DIR" "$IMAGES_DIR" "$CONFIG_DIR" "$PATCH_STATE_DIR"
+BUILT_IMAGES_DIR="$WORK_DIR/built-images"
+PACKAGE_DIR="$WORK_DIR/recovery-package"
+OTA_DIR="$PACKAGE_DIR/OTA_FILES_HERE"
+mkdir -p "$RAW_DIR" "$IMAGES_DIR" "$CONFIG_DIR" "$PATCH_STATE_DIR" \
+    "$BUILT_IMAGES_DIR" "$OTA_DIR"
 : > "$PATCH_STATE_DIR/modified_partitions"
 
 cleanup() {
@@ -163,30 +195,33 @@ has_partition() {
     return 1
 }
 
-has_partition system || die "Payload has no system partition"
-has_partition system_ext || die "Payload has no system_ext partition"
-has_partition my_product || die "Payload has no my_product partition"
-has_partition my_stock || die "Payload has no my_stock partition"
+for part in "${DYNAMIC_PARTITIONS[@]}"; do
+    has_partition "$part" || die "Payload has no required dynamic partition: $part"
+done
+has_partition vendor_boot || die "Payload has no vendor_boot partition"
 
-selected=(system system_ext my_product my_stock)
-if [[ "$enable_avb" == true ]]; then
-    has_partition vendor_boot || die "Payload has no vendor_boot partition"
-    selected+=(vendor_boot)
-fi
+selected=("${payload_partitions[@]}")
 
 partition_csv="$(IFS=,; printf '%s' "${selected[*]}")"
-mods "Extracting selected payload partitions"
+mods "Extracting all payload partitions"
 "$PAYLOAD_EXTRACT" extract --output "$RAW_DIR" --partitions "$partition_csv" "$payload_input" \
     || die "Payload extraction failed (incremental OTAs require source images)"
 
 declare -A FS_TYPE=()
 declare -A ORIGINAL_SIZE=()
 
+is_patch_partition() {
+    case "$1" in
+        system|system_ext|my_product|my_stock) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 for image in "$RAW_DIR"/*.img; do
     [[ -f "$image" ]] || continue
     part="$(basename "$image" .img)"
     ORIGINAL_SIZE["$part"]="$(stat -c '%s' "$image")"
-    [[ "$part" == vendor_boot ]] && continue
+    is_patch_partition "$part" || continue
     fs="$($GETTYPE -i "$image" 2>/dev/null || true)"
     case "$fs" in
         ext)
@@ -238,7 +273,7 @@ fi
 repack_partition() {
     local part="$1"
     local tree="$IMAGES_DIR/$part"
-    local output="$output_dir/$part.img"
+    local output="$BUILT_IMAGES_DIR/$part.img"
     local original_size="${ORIGINAL_SIZE[$part]:-0}"
     local fs="${FS_TYPE[$part]:-}"
     local fs_config="$CONFIG_DIR/${part}_fs_config"
@@ -270,12 +305,10 @@ repack_partition() {
 
     [[ -s "$output" ]] || die "Repacked image is empty: $output"
     new_size="$(stat -c '%s' "$output")"
-    [[ "$new_size" -le "$original_size" ]] \
-        || die "$part.img grew beyond its original partition size ($new_size > $original_size)"
+    info "$part.img repacked: $new_size bytes (payload image: $original_size bytes)"
 }
 
 mapfile -t modified_partitions < <(sort -u "$PATCH_STATE_DIR/modified_partitions")
-[[ ${#modified_partitions[@]} -gt 0 || "$enable_avb" == true ]] || die "No partition was modified"
 for part in "${modified_partitions[@]}"; do
     case "$part" in
         system|system_ext|my_product|my_stock) ;;
@@ -286,22 +319,97 @@ done
 
 if [[ "$enable_avb" == true ]]; then
     mods "Removing AVB flags from vendor_boot ramdisk"
-    bash "$ROOT_DIR/bin/package/DISABLE_AVB/HMATools/start" "$output_dir" vendor_boot
+    bash "$ROOT_DIR/bin/package/DISABLE_AVB/HMATools/start" "$BUILT_IMAGES_DIR" vendor_boot
 fi
 
-report="$output_dir/patch-report.txt"
+is_dynamic_partition() {
+    local wanted="$1" candidate
+    for candidate in "${DYNAMIC_PARTITIONS[@]}"; do
+        [[ "$candidate" == "$wanted" ]] && return 0
+    done
+    return 1
+}
+
+align_up() {
+    local value="$1" alignment="$2"
+    printf '%s\n' "$(( (value + alignment - 1) / alignment * alignment ))"
+}
+
+mods "Preparing X9 Ultra recovery package"
+cp -a "$FLASHER_TEMPLATE/." "$PACKAGE_DIR/"
+
+for part in "${payload_partitions[@]}"; do
+    is_dynamic_partition "$part" && continue
+    source_image="$RAW_DIR/$part.img"
+    [[ -f "$source_image" ]] || die "Extracted payload image is missing: $part.img"
+    if [[ "$part" == vendor_boot && -f "$BUILT_IMAGES_DIR/vendor_boot.img" ]]; then
+        source_image="$BUILT_IMAGES_DIR/vendor_boot.img"
+    fi
+    cp -f "$source_image" "$OTA_DIR/$part.img"
+done
+
+declare -a lp_args=(
+    --metadata-size "$SUPER_METADATA_SIZE"
+    --metadata-slots "$SUPER_METADATA_SLOTS"
+    --super-name super
+    --device "super:$SUPER_SIZE:$SUPER_ALIGNMENT:$SUPER_ALIGNMENT_OFFSET"
+    --block-size 4096
+    --group "qti_dynamic_partitions_a:$SUPER_GROUP_SIZE"
+    --group "qti_dynamic_partitions_b:$SUPER_GROUP_SIZE"
+    --virtual-ab
+    --sparse
+    --output "$OTA_DIR/super.img"
+)
+
+total_logical_size=0
+for part in "${DYNAMIC_PARTITIONS[@]}" "${DONOR_PARTITIONS[@]}"; do
+    if [[ "$part" == my_company || "$part" == my_preload ]]; then
+        source_image="$DONOR_DIR/${part}_a.img"
+    elif [[ -f "$BUILT_IMAGES_DIR/$part.img" ]]; then
+        source_image="$BUILT_IMAGES_DIR/$part.img"
+    else
+        source_image="$RAW_DIR/$part.img"
+    fi
+
+    [[ -s "$source_image" ]] || die "Logical partition image is missing: $part"
+    image_size="$(stat -c '%s' "$source_image")"
+    partition_size="$(align_up "$image_size" 4096)"
+    total_logical_size=$((total_logical_size + partition_size))
+    lp_args+=(
+        --partition "${part}_a:readonly:$partition_size:qti_dynamic_partitions_a"
+        --image "${part}_a=$source_image"
+        --partition "${part}_b:readonly:0:qti_dynamic_partitions_b"
+    )
+done
+
+[[ "$total_logical_size" -le "$SUPER_GROUP_SIZE" ]] \
+    || die "Logical images exceed the X9 Ultra super group ($total_logical_size > $SUPER_GROUP_SIZE)"
+
+mods "Building sparse super.img ($total_logical_size/$SUPER_GROUP_SIZE bytes allocated)"
+"$LPMAKE" "${lp_args[@]}" >/dev/null || die "Failed to build X9 Ultra super.img"
+[[ -s "$OTA_DIR/super.img" ]] || die "lpmake produced an empty super.img"
+
+report="$PACKAGE_DIR/patch-report.txt"
 {
     printf 'Input: %s\n' "$payload_input"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
+    printf 'Super logical allocation: %s / %s bytes\n' "$total_logical_size" "$SUPER_GROUP_SIZE"
     printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nVendor boot AVB patch: %s\n' \
         "$enable_debloat" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag" "$enable_avb"
-    printf '\nOutput images:\n'
-    for image in "$output_dir"/*.img; do
-        [[ -f "$image" ]] || continue
-        printf '%s  %s  %s bytes\n' "$(sha256sum "$image" | awk '{print $1}')" \
-            "$(basename "$image")" "$(stat -c '%s' "$image")"
-    done
+    printf '\nPatched logical partitions:\n'
+    printf '%s\n' "${modified_partitions[@]:-none}"
+    printf '\nTH donor images:\n'
+    (cd "$DONOR_DIR" && sha256sum -c SHA256SUMS)
 } > "$report"
 
-mods "Patch completed: $output_dir"
-[[ "$enable_avb" == false ]] || warn "Flash the patched vendor_boot.img together with the modified filesystem images"
+zip_path="$WORK_DIR/X9U_Mods_Recovery.zip"
+mods "Creating recovery ZIP (stored entries)"
+(
+    cd "$PACKAGE_DIR"
+    zip -0 -q -r "$zip_path" META-INF OTA_FILES_HERE tools patch-report.txt
+) || die "Failed to create recovery ZIP"
+[[ -s "$zip_path" ]] || die "Recovery ZIP is empty"
+
+final_zip="$output_dir/$(basename "$zip_path")"
+mv -f "$zip_path" "$final_zip"
+mods "Recovery flasher completed: $final_zip"
