@@ -10,7 +10,8 @@ This repository is a standalone extraction of the required tooling and patch log
 - Exact-name debloat using `bin/ddevice/DEBLOAT/APPLIST.txt`.
 - YouTube Morphe without microG. The stock APK remains at `my_product/app/YouTube/YouTube.apk`; Android init bind-mounts Morphe over the OPlus `/product/app/YouTube` overlay view after Package Manager scans it.
 - Independently selectable Google Photos Pixel XL spoof and secure-flag/screen-capture bypass patches.
-- Optional `vendor_boot` ramdisk AVB-flag removal (`--skip-avb` disables it).
+- Optional AVB-flag removal from `vendor` fstab plus the `boot` and `vendor_boot`
+  ramdisks (`--skip-avb` disables it).
 
 ## Requirements
 
@@ -20,7 +21,7 @@ image tools are bundled in `bin/`; install these host packages/commands:
 `python3`, `openjdk-21-jre`, `aapt`, `aria2`, `unzip`, `zip`, `p7zip-full`,
 `zipalign`, and `git-lfs`.
 
-The stock Thai `my_preload` donor is stored with Git LFS. Run `git lfs pull`
+The Thai `my_preload` donor with bundled APKs removed is stored with Git LFS. Run `git lfs pull`
 after cloning; the build aborts if the donor is missing or is still an LFS
 pointer.
 
@@ -34,7 +35,8 @@ chmod +x start-oplus.sh bin/Linux/x86_64/*
 Use `./start-oplus.sh --help` for patch toggles and output options. The output
 directory receives one `X9U_Mods_Recovery.zip`. It contains firmware from the
 input payload and a sparse `super.img` assembled from untouched payload images,
-the four patched images, and the stock Thai `my_company`/`my_preload` donors.
+the patched images, the stock Thai `my_company`, and the debloated Thai
+`my_preload` donor.
 
 Use `--skip-photos-spoof` and `--skip-secure-flag` to disable the two framework patches independently.
 

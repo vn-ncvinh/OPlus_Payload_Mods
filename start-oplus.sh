@@ -39,7 +39,7 @@ Options:
   --skip-youtube-morphe         Skip YouTube Morphe integration
   --skip-photos-spoof           Skip Google Photos Pixel XL spoof
   --skip-secure-flag            Skip secure-flag/screen-capture bypass
-  --skip-avb                    Skip vendor_boot ramdisk AVB patch
+  --skip-avb                    Skip AVB fstab patches in vendor, boot and vendor_boot
   --keep-workdir                Keep temporary extracted files
   -h, --help                    Show this help
 EOF
@@ -199,6 +199,9 @@ for part in "${DYNAMIC_PARTITIONS[@]}"; do
     has_partition "$part" || die "Payload has no required dynamic partition: $part"
 done
 has_partition vendor_boot || die "Payload has no vendor_boot partition"
+if [[ "$enable_avb" == true ]]; then
+    has_partition boot || die "Payload has no boot partition required for AVB patching"
+fi
 
 selected=("${payload_partitions[@]}")
 
@@ -213,6 +216,7 @@ declare -A ORIGINAL_SIZE=()
 is_patch_partition() {
     case "$1" in
         system|system_ext|my_product|my_stock) return 0 ;;
+        vendor) [[ "$enable_avb" == true ]] ;;
         *) return 1 ;;
     esac
 }
@@ -308,18 +312,27 @@ repack_partition() {
     info "$part.img repacked: $new_size bytes (payload image: $original_size bytes)"
 }
 
+if [[ "$enable_avb" == true ]]; then
+    mods "Removing AVB flags from vendor fstab"
+    if disable_avb_verify "$IMAGES_DIR/vendor"; then
+        mark_modified vendor
+    else
+        warn "No AVB fstab flags were found in vendor"
+    fi
+fi
+
 mapfile -t modified_partitions < <(sort -u "$PATCH_STATE_DIR/modified_partitions")
 for part in "${modified_partitions[@]}"; do
     case "$part" in
-        system|system_ext|my_product|my_stock) ;;
+        system|system_ext|my_product|my_stock|vendor) ;;
         *) die "Patch unexpectedly modified a partition outside fast mode: $part" ;;
     esac
     repack_partition "$part"
 done
 
 if [[ "$enable_avb" == true ]]; then
-    mods "Removing AVB flags from vendor_boot ramdisk"
-    bash "$ROOT_DIR/bin/package/DISABLE_AVB/HMATools/start" "$BUILT_IMAGES_DIR" vendor_boot
+    mods "Removing AVB flags from boot and vendor_boot ramdisks"
+    bash "$ROOT_DIR/bin/package/DISABLE_AVB/HMATools/start" "$BUILT_IMAGES_DIR" boot vendor_boot
 fi
 
 is_dynamic_partition() {
@@ -342,8 +355,8 @@ for part in "${payload_partitions[@]}"; do
     is_dynamic_partition "$part" && continue
     source_image="$RAW_DIR/$part.img"
     [[ -f "$source_image" ]] || die "Extracted payload image is missing: $part.img"
-    if [[ "$part" == vendor_boot && -f "$BUILT_IMAGES_DIR/vendor_boot.img" ]]; then
-        source_image="$BUILT_IMAGES_DIR/vendor_boot.img"
+    if [[ ( "$part" == boot || "$part" == vendor_boot ) && -f "$BUILT_IMAGES_DIR/$part.img" ]]; then
+        source_image="$BUILT_IMAGES_DIR/$part.img"
     fi
     cp -f "$source_image" "$OTA_DIR/$part.img"
 done
@@ -394,7 +407,7 @@ report="$PACKAGE_DIR/patch-report.txt"
     printf 'Input: %s\n' "$payload_input"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
     printf 'Super logical allocation: %s / %s bytes\n' "$total_logical_size" "$SUPER_GROUP_SIZE"
-    printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nVendor boot AVB patch: %s\n' \
+    printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nVendor/boot/vendor_boot AVB fstab patch: %s\n' \
         "$enable_debloat" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag" "$enable_avb"
     printf '\nPatched logical partitions:\n'
     printf '%s\n' "${modified_partitions[@]:-none}"
