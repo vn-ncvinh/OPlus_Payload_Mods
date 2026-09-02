@@ -146,6 +146,10 @@ prepare_required_images() {
             */*|"") abort "Invalid required image entry: $ENTRY" ;;
         esac
         package_has_file "$ENTRY" || abort "Missing required image: $ENTRY"
+        # Recovery unzip implementations commonly report 0 for ZIP64 entries
+        # larger than 4 GiB. super.img is validated by the ZIP64 streamer and
+        # sparse writer immediately before it is written.
+        [ "$ENTRY" = "$SUPER_ENTRY" ] && continue
         IMAGE_SIZE="$(package_file_size "$ENTRY")"
         is_uint "$IMAGE_SIZE" || abort "Cannot read size of $ENTRY"
         [ "$IMAGE_SIZE" -gt 0 ] || abort "$ENTRY is empty"
