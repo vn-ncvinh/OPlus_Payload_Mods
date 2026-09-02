@@ -12,6 +12,7 @@ This repository is a standalone extraction of the required tooling and patch log
 - Independently selectable Google Photos Pixel XL spoof and secure-flag/screen-capture bypass patches.
 - Optional AVB-flag removal from `vendor` fstab plus the `boot` and `vendor_boot`
   ramdisks (`--skip-avb` disables it).
+- Early `xbl_config` anti-rollback inspection; only ARB `0` is accepted.
 - GBL chainload v2.3.4 mode 1 EFISP generated from the payload `abl.img` with
   the OPlus OEM patch, stored at the ZIP root, then always flashed to
   `/dev/block/by-name/efisp` without an additional prompt.
@@ -49,6 +50,10 @@ from its input payload, a profile-specific sparse `super.img`, and a generated
 `required-images.txt` checked before flash confirmation. Each profile supplies
 its own donor partition list; donor images replace the corresponding payload
 images inside `super.img` and are not also flashed as standalone partitions.
+
+The bundled `arbextract` binary comes from
+[`koaaN/arbextract` release 1.0](https://github.com/koaaN/arbextract/releases/tag/1.0).
+The build stops before applying any mods when `xbl_config` reports non-zero ARB.
 
 Use `--skip-photos-spoof` and `--skip-secure-flag` to disable the two framework patches independently.
 

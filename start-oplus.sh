@@ -12,6 +12,7 @@ EXTRACT_EROFS="$TOOLS_DIR/extract.erofs"
 MKFS_EROFS="$TOOLS_DIR/mkfs.erofs"
 MAKE_EXT4FS="$TOOLS_DIR/make_ext4fs"
 LPMAKE="$TOOLS_DIR/lpmake"
+ARBEXTRACT="$TOOLS_DIR/arbextract"
 GBL_DIR="$ROOT_DIR/bin/package/GBL_CHAINLOAD"
 GBL_TOOL="$GBL_DIR/bin/gbl"
 GBL_EFI="$GBL_DIR/gbl-chainload-v2.3.4.efi"
@@ -88,7 +89,7 @@ output_dir="$(realpath -m "$output_dir")"
 [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] \
     || die "This tool currently supports Linux/WSL x86_64 only"
 
-for tool in "$PAYLOAD_EXTRACT" "$GETTYPE" "$EXTRACT_EROFS" "$MKFS_EROFS" "$MAKE_EXT4FS" "$LPMAKE"; do
+for tool in "$PAYLOAD_EXTRACT" "$GETTYPE" "$EXTRACT_EROFS" "$MKFS_EROFS" "$MAKE_EXT4FS" "$LPMAKE" "$ARBEXTRACT"; do
     [[ -x "$tool" ]] || die "Bundled tool is missing or not executable: $tool"
 done
 for command in python3 java unzip zip zipalign sha256sum find sed awk grep realpath; do
@@ -185,11 +186,31 @@ has_partition() {
 
 has_partition my_product || die "Payload has no my_product partition for device detection"
 has_partition my_manifest || die "Payload has no my_manifest partition for device detection"
+has_partition xbl_config || die "Payload has no xbl_config partition for anti-rollback check"
+
+mods "Checking anti-rollback metadata"
+"$PAYLOAD_EXTRACT" extract --output "$DETECT_RAW_DIR" \
+    --partitions xbl_config,my_product,my_manifest "$payload_input" \
+    || die "Unable to extract xbl_config/my_product/my_manifest for initial checks"
+
+arb_output="$("$ARBEXTRACT" "$DETECT_RAW_DIR/xbl_config.img" 2>&1)" \
+    || die "Unable to read anti-rollback metadata from xbl_config.img"
+arb_value="$(awk -F: '
+    /ARB \(Anti-Rollback\)/ {
+        gsub(/[[:space:]]/, "", $2)
+        print $2
+        exit
+    }
+' <<< "$arb_output")"
+[[ "$arb_value" =~ ^[0-9]+$ ]] \
+    || die "Unable to parse ARB value from xbl_config.img"
+if [[ ! "$arb_value" =~ ^0+$ ]]; then
+    warn "Anti-rollback is enabled in xbl_config.img (ARB=$arb_value)"
+    die "Refusing to build a package with non-zero ARB"
+fi
+info "Anti-rollback check passed (ARB=0)"
 
 mods "Detecting device profile from payload"
-"$PAYLOAD_EXTRACT" extract --output "$DETECT_RAW_DIR" \
-    --partitions my_product,my_manifest "$payload_input" \
-    || die "Unable to extract my_product/my_manifest for device detection"
 
 for detect_part in my_product my_manifest; do
     detect_image="$DETECT_RAW_DIR/$detect_part.img"
@@ -291,11 +312,12 @@ fi
 
 mv "$DETECT_RAW_DIR/my_product.img" "$RAW_DIR/my_product.img"
 mv "$DETECT_RAW_DIR/my_manifest.img" "$RAW_DIR/my_manifest.img"
+mv "$DETECT_RAW_DIR/xbl_config.img" "$RAW_DIR/xbl_config.img"
 
 selected=()
 for part in "${payload_partitions[@]}"; do
     case "$part" in
-        my_product|my_manifest) ;;
+        my_product|my_manifest|xbl_config) ;;
         *)
             is_profile_donor=false
             for donor_part in "${DONOR_PARTITIONS[@]}"; do
@@ -538,6 +560,7 @@ report="$PACKAGE_DIR/patch-report.txt"
     printf 'Device profile: %s (%s)\n' "$DEVICE_DISPLAY" "$DEVICE_ID"
     printf 'Payload project ID: %s\n' "$project_ids"
     printf 'Build display ID: %s\n' "$build_display_id"
+    printf 'Anti-rollback: %s\n' "$arb_value"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
     printf 'Super logical allocation: %s / %s bytes\n' "$total_logical_size" "$SUPER_GROUP_SIZE"
     printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nVendor/boot/vendor_boot AVB fstab patch: %s\n' \
