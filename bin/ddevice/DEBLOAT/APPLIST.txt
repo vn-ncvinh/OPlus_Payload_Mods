@@ -27,11 +27,9 @@ OppoStore
 Shortcuts
 SoftsimRedteaRoaming
 UPTsmService
-GooglePlayServicesUpdater
 OPPOStore
 OplusQuickGame
 FinShellWallet
-ColorDirectUI
 Pictorial
 HotGamesFolder
 Facebook-appmanager
