@@ -12,6 +12,9 @@ This repository is a standalone extraction of the required tooling and patch log
 - Independently selectable Google Photos Pixel XL spoof and secure-flag/screen-capture bypass patches.
 - Optional AVB-flag removal from `vendor` fstab plus the `boot` and `vendor_boot`
   ramdisks (`--skip-avb` disables it).
+- GBL chainload v2.3.4 mode 1 EFISP generated from the payload `abl.img` with
+  the OPlus OEM patch, stored at the ZIP root, then always flashed to
+  `/dev/block/by-name/efisp` without an additional prompt.
 
 ## Requirements
 

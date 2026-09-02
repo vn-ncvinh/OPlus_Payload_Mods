@@ -14,6 +14,9 @@ MAKE_EXT4FS="$TOOLS_DIR/make_ext4fs"
 LPMAKE="$TOOLS_DIR/lpmake"
 FLASHER_TEMPLATE="$ROOT_DIR/bin/flasher/x9u"
 DONOR_DIR="$ROOT_DIR/assets/x9u/donors"
+GBL_DIR="$ROOT_DIR/bin/package/GBL_CHAINLOAD"
+GBL_TOOL="$GBL_DIR/bin/gbl"
+GBL_EFI="$GBL_DIR/gbl-chainload-v2.3.4.efi"
 
 SUPER_SIZE=20451426304
 SUPER_GROUP_SIZE=20447232000
@@ -122,6 +125,8 @@ fi
     || die "X9 Ultra sparse stream writer is missing"
 [[ -x "$FLASHER_TEMPLATE/tools/arm64/stored_zip_streamer" ]] \
     || die "X9 Ultra ZIP streamer is missing"
+[[ -x "$GBL_TOOL" && -f "$GBL_DIR/efisp-package.py" && -f "$GBL_EFI" ]] \
+    || die "GBL chainload v2.3.4 tools are missing"
 [[ -f "$DONOR_DIR/SHA256SUMS" ]] || die "X9 Ultra donor checksums are missing"
 (
     cd "$DONOR_DIR"
@@ -198,6 +203,7 @@ has_partition() {
 for part in "${DYNAMIC_PARTITIONS[@]}"; do
     has_partition "$part" || die "Payload has no required dynamic partition: $part"
 done
+has_partition abl || die "Payload has no abl partition required for GBL chainload"
 has_partition vendor_boot || die "Payload has no vendor_boot partition"
 if [[ "$enable_avb" == true ]]; then
     has_partition boot || die "Payload has no boot partition required for AVB patching"
@@ -209,6 +215,17 @@ partition_csv="$(IFS=,; printf '%s' "${selected[*]}")"
 mods "Extracting all payload partitions"
 "$PAYLOAD_EXTRACT" extract --output "$RAW_DIR" --partitions "$partition_csv" "$payload_input" \
     || die "Payload extraction failed (incremental OTAs require source images)"
+
+mods "Building GBL chainload mode 1 EFISP"
+python3 "$GBL_DIR/efisp-package.py" \
+    --abl "$RAW_DIR/abl.img" \
+    --mode 1 \
+    --efi "$GBL_EFI" \
+    --oem oplus \
+    --out "$PACKAGE_DIR/efisp-gbl-chainload-mode1.efi" \
+    || die "Failed to build GBL chainload EFISP"
+"$GBL_TOOL" inspect "$PACKAGE_DIR/efisp-gbl-chainload-mode1.efi" >/dev/null \
+    || die "Generated GBL chainload EFISP failed validation"
 
 declare -A FS_TYPE=()
 declare -A ORIGINAL_SIZE=()
@@ -409,6 +426,8 @@ report="$PACKAGE_DIR/patch-report.txt"
     printf 'Super logical allocation: %s / %s bytes\n' "$total_logical_size" "$SUPER_GROUP_SIZE"
     printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nVendor/boot/vendor_boot AVB fstab patch: %s\n' \
         "$enable_debloat" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag" "$enable_avb"
+    printf 'GBL chainload: v2.3.4 mode 1, OEM oplus\n'
+    (cd "$PACKAGE_DIR" && sha256sum efisp-gbl-chainload-mode1.efi)
     printf '\nPatched logical partitions:\n'
     printf '%s\n' "${modified_partitions[@]:-none}"
     printf '\nTH donor images:\n'
@@ -417,7 +436,10 @@ report="$PACKAGE_DIR/patch-report.txt"
 
 (
     cd "$PACKAGE_DIR"
-    find OTA_FILES_HERE -maxdepth 1 -type f -name '*.img' -print | sort > required-images.txt
+    {
+        find OTA_FILES_HERE -maxdepth 1 -type f -name '*.img' -print
+        printf '%s\n' efisp-gbl-chainload-mode1.efi
+    } | sort > required-images.txt
 )
 [[ -s "$PACKAGE_DIR/required-images.txt" ]] || die "No required image list was generated"
 
@@ -425,7 +447,8 @@ zip_path="$WORK_DIR/X9U_Mods_Recovery.zip"
 mods "Creating recovery ZIP (stored entries)"
 (
     cd "$PACKAGE_DIR"
-    zip -0 -q -r "$zip_path" META-INF OTA_FILES_HERE tools patch-report.txt required-images.txt
+    zip -0 -q -r "$zip_path" META-INF OTA_FILES_HERE tools patch-report.txt \
+        required-images.txt efisp-gbl-chainload-mode1.efi
 ) || die "Failed to create recovery ZIP"
 [[ -s "$zip_path" ]] || die "Recovery ZIP is empty"
 

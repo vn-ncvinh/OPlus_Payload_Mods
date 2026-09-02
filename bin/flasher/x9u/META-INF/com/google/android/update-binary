@@ -11,6 +11,7 @@ WORKDIR="/tmp/pma110-eu-installer"
 BYNAME="/dev/block/by-name"
 SUPER_DEV="$BYNAME/super"
 SUPER_ENTRY="OTA_FILES_HERE/super.img"
+EFISP_ENTRY="efisp-gbl-chainload-mode1.efi"
 WRITER_ENTRY="tools/arm64/sparse_stream_writer"
 WRITER="$WORKDIR/sparse_stream_writer"
 ZIP_STREAMER_ENTRY="tools/arm64/stored_zip_streamer"
@@ -106,18 +107,26 @@ package_file_size() {
         awk -v wanted="$1" '$4 == wanted {print $1; exit}'
 }
 
-package_image_list() {
+package_firmware_list() {
     unzip -l "$ZIPFILE" "OTA_FILES_HERE/*.img" 2>/dev/null |
         awk '{
             prefix = "OTA_FILES_HERE/"
             if (index($4, prefix) == 1) {
                 name = substr($4, length(prefix) + 1)
-                if (length(name) > 4 && index(name, "/") == 0 &&
+                if (index(name, "/") == 0 && length(name) > 4 &&
                     substr(name, length(name) - 3) == ".img")
                     print $4
             }
         }' |
         sort
+}
+
+partition_for_entry() {
+    NAME="$(basename "$1")"
+    case "$NAME" in
+        *.img) PART="${NAME%.img}" ;;
+        *) abort "Unsupported firmware filename: $NAME" ;;
+    esac
 }
 
 prepare_required_images() {
@@ -129,7 +138,7 @@ prepare_required_images() {
 
     while IFS= read -r ENTRY || [ -n "$ENTRY" ]; do
         case "$ENTRY" in
-            OTA_FILES_HERE/*.img) ;;
+            OTA_FILES_HERE/*.img|efisp-gbl-chainload-mode1.efi) ;;
             *) abort "Invalid required image entry: $ENTRY" ;;
         esac
         NAME="${ENTRY#OTA_FILES_HERE/}"
@@ -144,13 +153,12 @@ prepare_required_images() {
 }
 
 prepare_firmware_list() {
-    package_image_list > "$FIRMWARE_LIST" ||
+    package_firmware_list > "$FIRMWARE_LIST" ||
         abort "Cannot read firmware image list"
     [ -s "$FIRMWARE_LIST" ] || abort "No firmware images found in package"
 
     while IFS= read -r ENTRY; do
-        NAME="$(basename "$ENTRY")"
-        PART="$(echo "$NAME" | sed 's/\.img$//')"
+        partition_for_entry "$ENTRY"
 
         case "$PART" in
             super|recovery)
@@ -264,8 +272,7 @@ resolve_targets() {
 
 flash_firmware_image() {
     ENTRY="$1"
-    NAME="$(basename "$ENTRY")"
-    PART="$(echo "$NAME" | sed 's/\.img$//')"
+    partition_for_entry "$ENTRY"
 
     is_supported_firmware "$PART" ||
         abort "Unsupported image in OTA_FILES_HERE: $NAME"
@@ -285,6 +292,27 @@ flash_firmware_image() {
         unzip -p "$ZIPFILE" "$ENTRY" > "$TARGET" 2> "$WORKDIR/unzip-$PART.log" ||
             abort "Failed flashing $(basename "$TARGET")"
     done
+}
+
+validate_efisp_target() {
+    package_has_file "$EFISP_ENTRY" || abort "Missing $EFISP_ENTRY"
+    IMAGE_SIZE="$(package_file_size "$EFISP_ENTRY")"
+    is_uint "$IMAGE_SIZE" || abort "Cannot read size of $EFISP_ENTRY"
+    [ "$IMAGE_SIZE" -gt 0 ] || abort "$EFISP_ENTRY is empty"
+
+    EFISP_DEV="$BYNAME/efisp"
+    [ -b "$EFISP_DEV" ] || abort "$EFISP_DEV is not a block device"
+    TARGET_SIZE="$(blockdev --getsize64 "$EFISP_DEV" 2>/dev/null)"
+    is_uint "$TARGET_SIZE" || abort "Cannot read size of $EFISP_DEV"
+    [ "$IMAGE_SIZE" -le "$TARGET_SIZE" ] ||
+        abort "$EFISP_ENTRY is larger than efisp"
+}
+
+flash_efisp_image() {
+    validate_efisp_target
+    print_box "Flashing efisp"
+    unzip -p "$ZIPFILE" "$EFISP_ENTRY" > "$EFISP_DEV" \
+        2> "$WORKDIR/unzip-efisp.log" || abort "Failed flashing efisp"
 }
 
 prepare_streamers() {
@@ -389,6 +417,7 @@ mkdir -p "$WORKDIR" || abort "Cannot create $WORKDIR"
 prepare_streamers
 prepare_required_images
 prepare_firmware_list
+validate_efisp_target
 
 set_progress 0.02
 show_progress 0.15 20
@@ -402,8 +431,7 @@ show_progress 0.45 240
 
 FIRMWARE_COUNT=0
 while IFS= read -r ENTRY; do
-    NAME="$(basename "$ENTRY")"
-    PART="$(echo "$NAME" | sed 's/\.img$//')"
+    partition_for_entry "$ENTRY"
 
     case "$PART" in
         super)
@@ -425,6 +453,9 @@ while IFS= read -r ENTRY; do
 done < "$FIRMWARE_LIST"
 
 [ "$FIRMWARE_COUNT" -gt 0 ] || abort "No firmware images were flashed"
+sync
+
+flash_efisp_image
 sync
 
 set_progress 0.60
