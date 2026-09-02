@@ -184,14 +184,13 @@ has_partition() {
     return 1
 }
 
-has_partition my_product || die "Payload has no my_product partition for device detection"
 has_partition my_manifest || die "Payload has no my_manifest partition for device detection"
 has_partition xbl_config || die "Payload has no xbl_config partition for anti-rollback check"
 
 mods "Checking anti-rollback metadata"
 "$PAYLOAD_EXTRACT" extract --output "$DETECT_RAW_DIR" \
-    --partitions xbl_config,my_product,my_manifest "$payload_input" \
-    || die "Unable to extract xbl_config/my_product/my_manifest for initial checks"
+    --partitions xbl_config "$payload_input" \
+    || die "Unable to extract xbl_config for anti-rollback check"
 
 arb_output="$("$ARBEXTRACT" "$DETECT_RAW_DIR/xbl_config.img" 2>&1)" \
     || die "Unable to read anti-rollback metadata from xbl_config.img"
@@ -211,8 +210,11 @@ fi
 info "Anti-rollback check passed (ARB=0)"
 
 mods "Detecting device profile from payload"
+"$PAYLOAD_EXTRACT" extract --output "$DETECT_RAW_DIR" \
+    --partitions my_manifest "$payload_input" \
+    || die "Unable to extract my_manifest for device detection"
 
-for detect_part in my_product my_manifest; do
+for detect_part in my_manifest; do
     detect_image="$DETECT_RAW_DIR/$detect_part.img"
     [[ -s "$detect_image" ]] || die "Extracted detection image is missing: $detect_part.img"
     detect_fs="$($GETTYPE -i "$detect_image" 2>/dev/null || true)"
@@ -230,31 +232,27 @@ for detect_part in my_product my_manifest; do
     esac
 done
 
-project_ids=""
-for detect_part in my_product my_manifest; do
-    prop_file="$DETECT_FS_DIR/$detect_part/build.prop"
-    if [[ ! -f "$prop_file" ]]; then
-        prop_file="$(find "$DETECT_FS_DIR/$detect_part" -type f -name build.prop -print -quit 2>/dev/null)"
-    fi
-    [[ -n "$prop_file" ]] || continue
-    project_ids="$(awk -F= '
-        $1 == "ro.product.supported_versions" {
-            sub(/^[^=]*=/, "")
-            print
-            exit
-        }
-    ' "$prop_file")"
-    [[ -z "$project_ids" ]] || break
-done
-project_ids="$(tr ',' ' ' <<< "$project_ids" | awk '{$1=$1; print}')"
-[[ -n "$project_ids" ]] \
-    || die "Unable to read ro.product.supported_versions from my_product/my_manifest"
-[[ "$project_ids" =~ ^[0-9]+([[:space:]]+[0-9]+)*$ ]] \
-    || die "Invalid ro.product.supported_versions value: $project_ids"
-
 manifest_build_prop="$DETECT_FS_DIR/my_manifest/build.prop"
 [[ -f "$manifest_build_prop" ]] \
     || die "my_manifest/build.prop is missing"
+project_ids="$(awk -F= '
+    $1 == "ro.product.supported_versions" {
+        supported_versions=$2
+    }
+    $1 == "ro.oplus.image.my_product.type" {
+        my_product_type=$2
+    }
+    END {
+        if (supported_versions != "") print supported_versions
+        else print my_product_type
+    }
+' "$manifest_build_prop")"
+project_ids="$(tr ',' ' ' <<< "$project_ids" | awk '{$1=$1; print}')"
+[[ -n "$project_ids" ]] \
+    || die "Unable to read the project ID from my_manifest/build.prop"
+[[ "$project_ids" =~ ^[0-9]+([[:space:]]+[0-9]+)*$ ]] \
+    || die "Invalid project ID in my_manifest/build.prop: $project_ids"
+
 build_display_id="$(awk -F= '
     $1 == "ro.build.display.id" {
         sub(/^[^=]*=/, "")
@@ -310,14 +308,13 @@ if [[ "$enable_avb" == true ]]; then
     has_partition boot || die "Payload has no boot partition required for AVB patching"
 fi
 
-mv "$DETECT_RAW_DIR/my_product.img" "$RAW_DIR/my_product.img"
 mv "$DETECT_RAW_DIR/my_manifest.img" "$RAW_DIR/my_manifest.img"
 mv "$DETECT_RAW_DIR/xbl_config.img" "$RAW_DIR/xbl_config.img"
 
 selected=()
 for part in "${payload_partitions[@]}"; do
     case "$part" in
-        my_product|my_manifest|xbl_config) ;;
+        my_manifest|xbl_config) ;;
         *)
             is_profile_donor=false
             for donor_part in "${DONOR_PARTITIONS[@]}"; do

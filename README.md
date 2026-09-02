@@ -40,9 +40,10 @@ chmod +x start-oplus.sh bin/Linux/x86_64/*
 ```
 
 Use `./start-oplus.sh --help` for patch toggles and output options. The script
-extracts `my_product` and `my_manifest`, reads
-`ro.product.supported_versions`, and automatically selects the matching device
-profile. Project ID `24877` selects OnePlus 15R; `25021`, `25022`, or `25211`
+first extracts only `xbl_config` for the ARB gate, then extracts only
+`my_manifest` and reads its project-ID properties to automatically select the
+matching device profile. Project ID `24877` selects OnePlus 15R; `25021`,
+`25022`, or `25211`
 selects Find X9 Ultra. Unknown IDs stop the build. The filename includes
 `ro.build.display.id` read from `my_manifest/build.prop`, for example
 `OP15R_Mods_CPH2767_16.0.10.500(EX01)_Recovery.zip`. Each ZIP contains firmware
