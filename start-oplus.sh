@@ -12,28 +12,13 @@ EXTRACT_EROFS="$TOOLS_DIR/extract.erofs"
 MKFS_EROFS="$TOOLS_DIR/mkfs.erofs"
 MAKE_EXT4FS="$TOOLS_DIR/make_ext4fs"
 LPMAKE="$TOOLS_DIR/lpmake"
-FLASHER_TEMPLATE="$ROOT_DIR/bin/flasher/x9u"
-DONOR_DIR="$ROOT_DIR/assets/x9u/donors"
 GBL_DIR="$ROOT_DIR/bin/package/GBL_CHAINLOAD"
 GBL_TOOL="$GBL_DIR/bin/gbl"
 GBL_EFI="$GBL_DIR/gbl-chainload-v2.3.4.efi"
 
-SUPER_SIZE=20451426304
-SUPER_GROUP_SIZE=20447232000
-SUPER_ALIGNMENT=524288
-SUPER_ALIGNMENT_OFFSET=81920
-SUPER_METADATA_SIZE=65536
-SUPER_METADATA_SLOTS=3
-
-DYNAMIC_PARTITIONS=(
-    system system_ext product vendor odm my_product my_engineering vendor_dlkm
-    system_dlkm my_stock my_heytap my_carrier my_region my_bigball my_manifest
-)
-DONOR_PARTITIONS=(my_company my_preload)
-
 usage() {
     cat <<'EOF'
-Usage: ./start-oplus.sh <payload.bin> [options]
+Usage: ./start-oplus.sh <payload.bin|ota.zip> [options]
 
 Options:
   --output <dir>                Recovery ZIP output directory (default: ./output)
@@ -90,8 +75,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -n "$payload_input" ]] || die "payload.bin is required"
-[[ -f "$payload_input" ]] || die "Payload not found: $payload_input"
+FLASHER_TEMPLATE="$ROOT_DIR/bin/flasher/common"
+
+[[ -n "$payload_input" ]] || die "A payload.bin or OTA ZIP input is required"
+[[ -f "$payload_input" ]] || die "Payload/OTA input not found: $payload_input"
 payload_input="$(realpath "$payload_input")"
 output_dir="$(realpath -m "$output_dir")"
 
@@ -120,19 +107,13 @@ if [[ "$enable_youtube" == true ]]; then
 fi
 
 [[ -x "$FLASHER_TEMPLATE/META-INF/com/google/android/update-binary" ]] \
-    || die "X9 Ultra recovery flasher template is missing"
+    || die "Recovery flasher template is missing"
 [[ -x "$FLASHER_TEMPLATE/tools/arm64/sparse_stream_writer" ]] \
-    || die "X9 Ultra sparse stream writer is missing"
+    || die "Sparse stream writer is missing"
 [[ -x "$FLASHER_TEMPLATE/tools/arm64/stored_zip_streamer" ]] \
-    || die "X9 Ultra ZIP streamer is missing"
+    || die "ZIP streamer is missing"
 [[ -x "$GBL_TOOL" && -f "$GBL_DIR/efisp-package.py" && -f "$GBL_EFI" ]] \
     || die "GBL chainload v2.3.4 tools are missing"
-[[ -f "$DONOR_DIR/SHA256SUMS" ]] || die "X9 Ultra donor checksums are missing"
-(
-    cd "$DONOR_DIR"
-    sha256sum -c SHA256SUMS
-) >/dev/null || die "X9 Ultra donor image is missing, is an LFS pointer, or has the wrong checksum"
-
 if [[ -e "$output_dir" ]]; then
     [[ -d "$output_dir" ]] || die "Output path is not a directory: $output_dir"
     [[ -z "$(find "$output_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
@@ -150,8 +131,10 @@ PATCH_STATE_DIR="$WORK_DIR/state"
 BUILT_IMAGES_DIR="$WORK_DIR/built-images"
 PACKAGE_DIR="$WORK_DIR/recovery-package"
 OTA_DIR="$PACKAGE_DIR/OTA_FILES_HERE"
+DETECT_RAW_DIR="$WORK_DIR/detect-raw"
+DETECT_FS_DIR="$WORK_DIR/detect-fs"
 mkdir -p "$RAW_DIR" "$IMAGES_DIR" "$CONFIG_DIR" "$PATCH_STATE_DIR" \
-    "$BUILT_IMAGES_DIR" "$OTA_DIR"
+    "$BUILT_IMAGES_DIR" "$OTA_DIR" "$DETECT_RAW_DIR" "$DETECT_FS_DIR"
 : > "$PATCH_STATE_DIR/modified_partitions"
 
 cleanup() {
@@ -200,6 +183,103 @@ has_partition() {
     return 1
 }
 
+has_partition my_product || die "Payload has no my_product partition for device detection"
+has_partition my_manifest || die "Payload has no my_manifest partition for device detection"
+
+mods "Detecting device profile from payload"
+"$PAYLOAD_EXTRACT" extract --output "$DETECT_RAW_DIR" \
+    --partitions my_product,my_manifest "$payload_input" \
+    || die "Unable to extract my_product/my_manifest for device detection"
+
+for detect_part in my_product my_manifest; do
+    detect_image="$DETECT_RAW_DIR/$detect_part.img"
+    [[ -s "$detect_image" ]] || die "Extracted detection image is missing: $detect_part.img"
+    detect_fs="$($GETTYPE -i "$detect_image" 2>/dev/null || true)"
+    case "$detect_fs" in
+        ext)
+            python3 "$ROOT_DIR/bin/imgextractor/imgextractor.py" \
+                "$detect_image" "$DETECT_FS_DIR" >/dev/null \
+                || die "Failed to inspect $detect_part for device detection"
+            ;;
+        erofs)
+            "$EXTRACT_EROFS" -x -i "$detect_image" -o "$DETECT_FS_DIR" >/dev/null \
+                || die "Failed to inspect $detect_part for device detection"
+            ;;
+        *) die "Unsupported $detect_part filesystem for device detection: $detect_fs" ;;
+    esac
+done
+
+project_ids=""
+for detect_part in my_product my_manifest; do
+    prop_file="$DETECT_FS_DIR/$detect_part/build.prop"
+    if [[ ! -f "$prop_file" ]]; then
+        prop_file="$(find "$DETECT_FS_DIR/$detect_part" -type f -name build.prop -print -quit 2>/dev/null)"
+    fi
+    [[ -n "$prop_file" ]] || continue
+    project_ids="$(awk -F= '
+        $1 == "ro.product.supported_versions" {
+            sub(/^[^=]*=/, "")
+            print
+            exit
+        }
+    ' "$prop_file")"
+    [[ -z "$project_ids" ]] || break
+done
+project_ids="$(tr ',' ' ' <<< "$project_ids" | awk '{$1=$1; print}')"
+[[ -n "$project_ids" ]] \
+    || die "Unable to read ro.product.supported_versions from my_product/my_manifest"
+[[ "$project_ids" =~ ^[0-9]+([[:space:]]+[0-9]+)*$ ]] \
+    || die "Invalid ro.product.supported_versions value: $project_ids"
+
+manifest_build_prop="$DETECT_FS_DIR/my_manifest/build.prop"
+[[ -f "$manifest_build_prop" ]] \
+    || die "my_manifest/build.prop is missing"
+build_display_id="$(awk -F= '
+    $1 == "ro.build.display.id" {
+        sub(/^[^=]*=/, "")
+        print
+        exit
+    }
+' "$manifest_build_prop")"
+[[ -n "$build_display_id" ]] \
+    || die "Unable to read ro.build.display.id from my_manifest/build.prop"
+safe_build_display_id="$(sed 's/[^A-Za-z0-9._()-]/_/g' <<< "$build_display_id")"
+[[ -n "$safe_build_display_id" ]] || die "Invalid ro.build.display.id: $build_display_id"
+
+device_id=""
+for profile_file in "$ROOT_DIR"/devices/*/profile.sh; do
+    [[ -f "$profile_file" ]] || continue
+    profile_match="$(bash -c '
+        source "$1"
+        for detected in $2; do
+            case " $SUPPORTED_PROJECT_IDS " in
+                *" $detected "*) printf "%s\n" "$DEVICE_ID"; exit 0 ;;
+            esac
+        done
+    ' _ "$profile_file" "$project_ids")"
+    [[ -z "$profile_match" ]] || {
+        [[ -z "$device_id" || "$device_id" == "$profile_match" ]] \
+            || die "Project ID $project_ids matches multiple device profiles"
+        device_id="$profile_match"
+    }
+done
+[[ -n "$device_id" ]] \
+    || die "Unsupported project ID from payload: $project_ids"
+
+PROFILE_FILE="$ROOT_DIR/devices/$device_id/profile.sh"
+source "$PROFILE_FILE"
+DONOR_DIR=""
+[[ -n "$DONOR_RELATIVE_DIR" ]] && DONOR_DIR="$ROOT_DIR/$DONOR_RELATIVE_DIR"
+info "Detected $DEVICE_DISPLAY (project ID: $project_ids, build: $build_display_id)"
+
+if [[ ${#DONOR_PARTITIONS[@]} -gt 0 ]]; then
+    [[ -f "$DONOR_DIR/SHA256SUMS" ]] || die "$DEVICE_DISPLAY donor checksums are missing"
+    (
+        cd "$DONOR_DIR"
+        sha256sum -c SHA256SUMS
+    ) >/dev/null || die "$DEVICE_DISPLAY donor image is missing, is an LFS pointer, or has the wrong checksum"
+fi
+
 for part in "${DYNAMIC_PARTITIONS[@]}"; do
     has_partition "$part" || die "Payload has no required dynamic partition: $part"
 done
@@ -209,12 +289,29 @@ if [[ "$enable_avb" == true ]]; then
     has_partition boot || die "Payload has no boot partition required for AVB patching"
 fi
 
-selected=("${payload_partitions[@]}")
+mv "$DETECT_RAW_DIR/my_product.img" "$RAW_DIR/my_product.img"
+mv "$DETECT_RAW_DIR/my_manifest.img" "$RAW_DIR/my_manifest.img"
 
-partition_csv="$(IFS=,; printf '%s' "${selected[*]}")"
-mods "Extracting all payload partitions"
-"$PAYLOAD_EXTRACT" extract --output "$RAW_DIR" --partitions "$partition_csv" "$payload_input" \
-    || die "Payload extraction failed (incremental OTAs require source images)"
+selected=()
+for part in "${payload_partitions[@]}"; do
+    case "$part" in
+        my_product|my_manifest) ;;
+        *)
+            is_profile_donor=false
+            for donor_part in "${DONOR_PARTITIONS[@]}"; do
+                [[ "$part" == "$donor_part" ]] && is_profile_donor=true
+            done
+            [[ "$is_profile_donor" == true ]] || selected+=("$part")
+            ;;
+    esac
+done
+
+if [[ ${#selected[@]} -gt 0 ]]; then
+    partition_csv="$(IFS=,; printf '%s' "${selected[*]}")"
+    mods "Extracting remaining payload partitions"
+    "$PAYLOAD_EXTRACT" extract --output "$RAW_DIR" --partitions "$partition_csv" "$payload_input" \
+        || die "Payload extraction failed (incremental OTAs require source images)"
+fi
 
 mods "Building GBL chainload mode 1 EFISP"
 python3 "$GBL_DIR/efisp-package.py" \
@@ -360,16 +457,32 @@ is_dynamic_partition() {
     return 1
 }
 
+is_donor_partition() {
+    local wanted="$1" candidate
+    for candidate in "${DONOR_PARTITIONS[@]}"; do
+        [[ "$candidate" == "$wanted" ]] && return 0
+    done
+    return 1
+}
+
 align_up() {
     local value="$1" alignment="$2"
     printf '%s\n' "$(( (value + alignment - 1) / alignment * alignment ))"
 }
 
-mods "Preparing X9 Ultra recovery package"
+mods "Preparing $DEVICE_DISPLAY recovery package"
 cp -a "$FLASHER_TEMPLATE/." "$PACKAGE_DIR/"
+
+{
+    printf "DEVICE_ID='%s'\n" "$DEVICE_ID"
+    printf "DEVICE_DISPLAY='%s'\n" "$DEVICE_DISPLAY"
+    printf "SUPPORTED_PROJECT_IDS='%s'\n" "$SUPPORTED_PROJECT_IDS"
+    printf 'TARGET_SUPER_BYTES=%s\n' "$SUPER_SIZE"
+} > "$PACKAGE_DIR/device-profile.conf"
 
 for part in "${payload_partitions[@]}"; do
     is_dynamic_partition "$part" && continue
+    is_donor_partition "$part" && continue
     source_image="$RAW_DIR/$part.img"
     [[ -f "$source_image" ]] || die "Extracted payload image is missing: $part.img"
     if [[ ( "$part" == boot || "$part" == vendor_boot ) && -f "$BUILT_IMAGES_DIR/$part.img" ]]; then
@@ -393,7 +506,7 @@ declare -a lp_args=(
 
 total_logical_size=0
 for part in "${DYNAMIC_PARTITIONS[@]}" "${DONOR_PARTITIONS[@]}"; do
-    if [[ "$part" == my_company || "$part" == my_preload ]]; then
+    if is_donor_partition "$part"; then
         source_image="$DONOR_DIR/${part}_a.img"
     elif [[ -f "$BUILT_IMAGES_DIR/$part.img" ]]; then
         source_image="$BUILT_IMAGES_DIR/$part.img"
@@ -413,15 +526,18 @@ for part in "${DYNAMIC_PARTITIONS[@]}" "${DONOR_PARTITIONS[@]}"; do
 done
 
 [[ "$total_logical_size" -le "$SUPER_GROUP_SIZE" ]] \
-    || die "Logical images exceed the X9 Ultra super group ($total_logical_size > $SUPER_GROUP_SIZE)"
+    || die "Logical images exceed the $DEVICE_DISPLAY super group ($total_logical_size > $SUPER_GROUP_SIZE)"
 
 mods "Building sparse super.img ($total_logical_size/$SUPER_GROUP_SIZE bytes allocated)"
-"$LPMAKE" "${lp_args[@]}" >/dev/null || die "Failed to build X9 Ultra super.img"
+"$LPMAKE" "${lp_args[@]}" >/dev/null || die "Failed to build $DEVICE_DISPLAY super.img"
 [[ -s "$OTA_DIR/super.img" ]] || die "lpmake produced an empty super.img"
 
 report="$PACKAGE_DIR/patch-report.txt"
 {
     printf 'Input: %s\n' "$payload_input"
+    printf 'Device profile: %s (%s)\n' "$DEVICE_DISPLAY" "$DEVICE_ID"
+    printf 'Payload project ID: %s\n' "$project_ids"
+    printf 'Build display ID: %s\n' "$build_display_id"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
     printf 'Super logical allocation: %s / %s bytes\n' "$total_logical_size" "$SUPER_GROUP_SIZE"
     printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nVendor/boot/vendor_boot AVB fstab patch: %s\n' \
@@ -430,8 +546,10 @@ report="$PACKAGE_DIR/patch-report.txt"
     (cd "$PACKAGE_DIR" && sha256sum efisp-gbl-chainload-mode1.efi)
     printf '\nPatched logical partitions:\n'
     printf '%s\n' "${modified_partitions[@]:-none}"
-    printf '\nTH donor images:\n'
-    (cd "$DONOR_DIR" && sha256sum -c SHA256SUMS)
+    if [[ ${#DONOR_PARTITIONS[@]} -gt 0 ]]; then
+        printf '\nDonor images:\n'
+        (cd "$DONOR_DIR" && sha256sum -c SHA256SUMS)
+    fi
 } > "$report"
 
 (
@@ -443,11 +561,12 @@ report="$PACKAGE_DIR/patch-report.txt"
 )
 [[ -s "$PACKAGE_DIR/required-images.txt" ]] || die "No required image list was generated"
 
-zip_path="$WORK_DIR/X9U_Mods_Recovery.zip"
+zip_name="${OUTPUT_ZIP%_Recovery.zip}_${safe_build_display_id}_Recovery.zip"
+zip_path="$WORK_DIR/$zip_name"
 mods "Creating recovery ZIP (stored entries)"
 (
     cd "$PACKAGE_DIR"
-    zip -0 -q -r "$zip_path" META-INF OTA_FILES_HERE tools patch-report.txt \
+    zip -0 -q -r "$zip_path" META-INF OTA_FILES_HERE tools patch-report.txt device-profile.conf \
         required-images.txt efisp-gbl-chainload-mode1.efi
 ) || die "Failed to create recovery ZIP"
 [[ -s "$zip_path" ]] || die "Recovery ZIP is empty"

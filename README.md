@@ -1,6 +1,6 @@
 # OPlus Payload Mods
 
-Payload v2 patcher and OPPO Find X9 Ultra recovery-flasher builder for
+Multi-device payload v2 patcher and recovery-flasher builder for OPlus
 ColorOS/OxygenOS layouts that use `my_product`.
 
 This repository is a standalone extraction of the required tooling and patch logic from Xiaomi 8E5 Global Mods. It does not read or source files from that repository at runtime.
@@ -24,36 +24,45 @@ image tools are bundled in `bin/`; install these host packages/commands:
 `python3`, `openjdk-21-jre`, `aapt`, `aria2`, `unzip`, `zip`, `p7zip-full`,
 `zipalign`, and `git-lfs`.
 
-The Thai `my_preload` donor with bundled APKs removed is stored with Git LFS. Run `git lfs pull`
-after cloning; the build aborts if the donor is missing or is still an LFS
-pointer.
+The Find X9 Ultra Thai `my_preload` donor with bundled APKs removed is stored
+with Git LFS. Run `git lfs pull` after cloning; X9U builds abort if the donor
+is missing or is still an LFS pointer. OnePlus 15R uses its own donor set from
+`assets/op15r/donors`: `system_dlkm_oki`, `my_company`, and the `34604038`
+variant of `my_preload` corresponding to metadata/NV ID `10100001`.
 
 ## Usage
 
 ```bash
 chmod +x start-oplus.sh bin/Linux/x86_64/*
 ./start-oplus.sh /path/to/payload.bin
+./start-oplus.sh /path/to/full-ota.zip
 ```
 
-Use `./start-oplus.sh --help` for patch toggles and output options. The output
-directory receives one `X9U_Mods_Recovery.zip`. It contains firmware from the
-input payload and a sparse `super.img` assembled from untouched payload images,
-the patched images, the stock Thai `my_company`, and the debloated Thai
-`my_preload` donor. Each build also generates `required-images.txt`; the
-installer verifies every image listed there before asking for flash confirmation.
+Use `./start-oplus.sh --help` for patch toggles and output options. The script
+extracts `my_product` and `my_manifest`, reads
+`ro.product.supported_versions`, and automatically selects the matching device
+profile. Project ID `24877` selects OnePlus 15R; `25021`, `25022`, or `25211`
+selects Find X9 Ultra. Unknown IDs stop the build. The filename includes
+`ro.build.display.id` read from `my_manifest/build.prop`, for example
+`OP15R_Mods_CPH2767_16.0.10.500(EX01)_Recovery.zip`. Each ZIP contains firmware
+from its input payload, a profile-specific sparse `super.img`, and a generated
+`required-images.txt` checked before flash confirmation. Each profile supplies
+its own donor partition list; donor images replace the corresponding payload
+images inside `super.img` and are not also flashed as standalone partitions.
 
 Use `--skip-photos-spoof` and `--skip-secure-flag` to disable the two framework patches independently.
 
 EROFS images are rebuilt with `lz4hc,9` compression and 16 KiB physical
 clusters. A modified logical image may grow beyond its old allocation as long
-as all images still fit the X9 Ultra dynamic-partition group.
+as all images still fit the selected device's dynamic-partition group.
 
 The current paths and patch anchors were checked against an unpacked CPH2841 Android 16 payload; see [`docs/cph2841-layout.md`](docs/cph2841-layout.md).
 
 ## Warning
 
-The generated installer is only for Find X9 Ultra project IDs
-`25021`/`25022`/`25211`. It never resizes or otherwise modifies the GPT and
-requires an existing `super` block device of at least 20,451,426,304 bytes.
-Keep a tested recovery/EDL path and review the on-device confirmation screen
-before flashing.
+Supported recovery targets are Find X9 Ultra project IDs
+`25021`/`25022`/`25211` and OnePlus 15R project ID `24877`. The installer
+never resizes or otherwise modifies the GPT. The existing `super` must be at
+least 20,451,426,304 bytes for X9U or 16,231,956,480 bytes for OnePlus 15R. Keep a
+tested recovery/EDL path and review the on-device confirmation screen before
+flashing.

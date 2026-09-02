@@ -4,6 +4,7 @@
 *.pk8 binary
 *.img binary
 assets/x9u/donors/my_preload_a.img filter=lfs diff=lfs merge=lfs -text
+assets/op15r/donors/*.img filter=lfs diff=lfs merge=lfs -text
 bin/Linux/x86_64/* binary
 bin/package/DISABLE_AVB/HMATools/aosp/plugged/bin/* binary
 bin/package/DISABLE_AVB/HMATools/aosp/plugged/lib/* binary

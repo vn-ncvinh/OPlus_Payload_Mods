@@ -1,13 +1,13 @@
 #!/system/bin/sh
 
-# OPPO Find X9 Ultra modded recovery installer.
+# Multi-device OPlus modded recovery installer.
 # Streams sparse super.img directly to the existing super block device and
 # flashes OTA_FILES_HERE firmware images without modifying the GPT.
 
 OUTFD="$2"
 ZIPFILE="$3"
 UI_PATH=""
-WORKDIR="/tmp/pma110-eu-installer"
+WORKDIR="/tmp/oplus-mods-installer"
 BYNAME="/dev/block/by-name"
 SUPER_DEV="$BYNAME/super"
 SUPER_ENTRY="OTA_FILES_HERE/super.img"
@@ -19,10 +19,12 @@ ZIP_STREAMER="$WORKDIR/stored_zip_streamer"
 FIRMWARE_LIST="$WORKDIR/firmware-images.txt"
 REQUIRED_IMAGES_ENTRY="required-images.txt"
 REQUIRED_IMAGES_LIST="$WORKDIR/required-images.txt"
+DEVICE_PROFILE_ENTRY="device-profile.conf"
+DEVICE_PROFILE_FILE="$WORKDIR/device-profile.conf"
 SUPER_WRITTEN=0
 FLASH_ABL=0
 
-TARGET_SUPER_BYTES=20451426304
+TARGET_SUPER_BYTES=""
 
 if [ -n "$OUTFD" ] && [ -e "/proc/self/fd/$OUTFD" ]; then
     UI_PATH="/proc/self/fd/$OUTFD"
@@ -105,6 +107,20 @@ package_has_file() {
 package_file_size() {
     unzip -l "$ZIPFILE" "$1" 2>/dev/null |
         awk -v wanted="$1" '$4 == wanted {print $1; exit}'
+}
+
+prepare_device_profile() {
+    package_has_file "$DEVICE_PROFILE_ENTRY" || abort "Missing $DEVICE_PROFILE_ENTRY"
+    unzip -p "$ZIPFILE" "$DEVICE_PROFILE_ENTRY" > "$DEVICE_PROFILE_FILE" 2>/dev/null ||
+        abort "Cannot extract $DEVICE_PROFILE_ENTRY"
+    [ -s "$DEVICE_PROFILE_FILE" ] || abort "$DEVICE_PROFILE_ENTRY is empty"
+    . "$DEVICE_PROFILE_FILE"
+
+    [ -n "$DEVICE_ID" ] || abort "Device profile has no ID"
+    [ -n "$DEVICE_DISPLAY" ] || abort "Device profile has no display name"
+    [ -n "$SUPPORTED_PROJECT_IDS" ] || abort "Device profile has no project IDs"
+    is_uint "$TARGET_SUPER_BYTES" || abort "Device profile has invalid super size"
+    [ "$TARGET_SUPER_BYTES" -gt 0 ] || abort "Device profile has empty super size"
 }
 
 package_firmware_list() {
@@ -390,13 +406,6 @@ flash_super_image() {
     print_box "super.img flashed"
 }
 
-ui_print "###################################"
-ui_print "#            X9U MODS             #"
-ui_print "#          Find X9 Ultra          #"
-ui_print "#       Recovery Super Flasher    #"
-ui_print "###################################"
-ui_print ""
-
 for TOOL in unzip awk sed grep sort basename blockdev \
     umount mkdir chmod mkfifo sync getprop getevent rm; do
     command -v "$TOOL" >/dev/null 2>&1 ||
@@ -405,18 +414,22 @@ done
 
 [ -f "$ZIPFILE" ] || abort "Package ZIP is unavailable"
 
-PRJ_ID="$(getprop ro.boot.prjname 2>/dev/null)"
-case "$PRJ_ID" in
-    25021|25022|25211)
-        print_box "Project ID $PRJ_ID accepted"
-        ;;
-    *)
-        abort "Unsupported project ID: $PRJ_ID"
-        ;;
-esac
-
 rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR" || abort "Cannot create $WORKDIR"
+prepare_device_profile
+
+ui_print "###################################"
+ui_print "#          OPLUS MODS             #"
+ui_print "# $(printf '%-31.31s' "$DEVICE_DISPLAY") #"
+ui_print "#       Recovery Super Flasher    #"
+ui_print "###################################"
+ui_print ""
+
+PRJ_ID="$(getprop ro.boot.prjname 2>/dev/null)"
+case " $SUPPORTED_PROJECT_IDS " in
+    *" $PRJ_ID "*) print_box "Project ID $PRJ_ID accepted" ;;
+    *) abort "Unsupported project ID: $PRJ_ID" ;;
+esac
 
 prepare_streamers
 prepare_required_images
