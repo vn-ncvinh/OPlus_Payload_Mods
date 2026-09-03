@@ -28,7 +28,7 @@ Options:
   --skip-youtube-morphe         Skip YouTube Morphe integration
   --skip-photos-spoof           Skip Google Photos Pixel XL spoof
   --skip-secure-flag            Skip secure-flag/screen-capture bypass
-  --skip-oplus-customize        Skip OplusCustomizeService lock-state bypass
+  --skip-lock-assistant-bypass  Skip LockAssistantBypass
   --skip-avb                    Skip AVB fstab patches in vendor, boot and vendor_boot
   --keep-workdir                Keep temporary extracted files
   -h, --help                    Show this help
@@ -44,7 +44,7 @@ enable_debloat=true
 enable_youtube=true
 enable_photos_spoof=true
 enable_secure_flag=true
-enable_oplus_customize=true
+enable_lock_assistant_bypass=true
 enable_avb=true
 keep_workdir=false
 
@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
         --skip-youtube-morphe) enable_youtube=false; shift ;;
         --skip-photos-spoof) enable_photos_spoof=false; shift ;;
         --skip-secure-flag) enable_secure_flag=false; shift ;;
-        --skip-oplus-customize) enable_oplus_customize=false; shift ;;
+        --skip-lock-assistant-bypass) enable_lock_assistant_bypass=false; shift ;;
         --skip-avb) enable_avb=false; shift ;;
         --keep-workdir) keep_workdir=true; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -353,7 +353,7 @@ needs_partition_tree() {
     case "$1" in
         system)
             [[ "$enable_youtube" == true || "$enable_secure_flag" == true || \
-                "$enable_photos_spoof" == true || "$enable_oplus_customize" == true ]]
+                "$enable_photos_spoof" == true || "$enable_lock_assistant_bypass" == true ]]
             ;;
         system_ext|my_stock) [[ "$enable_debloat" == true ]] ;;
         my_product) [[ "$enable_debloat" == true || "$enable_youtube" == true ]] ;;
@@ -418,9 +418,9 @@ if [[ "$enable_secure_flag" == true ]]; then
     bash "$ROOT_DIR/bin/package/KouseiPatcher/secure_flag_patch.sh"
 fi
 
-if [[ "$enable_oplus_customize" == true ]]; then
-    mods "Applying OplusCustomizeService patch"
-    bash "$ROOT_DIR/bin/package/KouseiPatcher/oplus_customize_patch.sh"
+if [[ "$enable_lock_assistant_bypass" == true ]]; then
+    mods "Applying LockAssistantBypass"
+    bash "$ROOT_DIR/bin/package/LockAssistantBypass/patch.sh"
 fi
 
 if [[ "$enable_photos_spoof" == true ]]; then
@@ -585,9 +585,9 @@ report="$PACKAGE_DIR/patch-report.txt"
     printf 'Anti-rollback: %s\n' "$arb_value"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
     printf 'Super logical allocation: %s / %s bytes\n' "$total_logical_size" "$SUPER_GROUP_SIZE"
-    printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nOplusCustomizeService: %s\nVendor/boot/vendor_boot AVB fstab patch: %s\n' \
+    printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nLockAssistantBypass: %s\nVendor/boot/vendor_boot AVB fstab patch: %s\n' \
         "$enable_debloat" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag" \
-        "$enable_oplus_customize" "$enable_avb"
+        "$enable_lock_assistant_bypass" "$enable_avb"
     printf 'GBL chainload: v2.3.4 mode 1, OEM oplus\n'
     (cd "$PACKAGE_DIR" && sha256sum efisp-gbl-chainload-mode1.efi)
     printf '\nPatched logical partitions:\n'

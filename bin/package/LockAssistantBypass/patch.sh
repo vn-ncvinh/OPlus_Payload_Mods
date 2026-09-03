@@ -22,7 +22,7 @@ for dex in "$jar_out"/classes*.dex; do
 done
 [[ "$dex_count" -gt 0 ]] || die "oplus-services.jar contains no DEX files"
 
-python3 "$ROOT_DIR/bin/package/KouseiPatcher/oplus_customize_patcher.py" "$jar_out" \
+python3 "$ROOT_DIR/bin/package/LockAssistantBypass/patcher.py" "$jar_out" \
     || die "OplusCustomizeService targets are incompatible"
 
 for folder in "$jar_out"/classes*.dex.out; do
@@ -39,4 +39,4 @@ zipalign -f 4 "$temp_dir/unaligned.jar" "$temp_dir/patched.jar" \
     || die "zipalign failed for oplus-services.jar"
 cp -f "$temp_dir/patched.jar" "$jar_path"
 mark_modified_path "$jar_path"
-mods "OplusCustomizeService patch applied to $jar_path (3 targets)"
+mods "LockAssistantBypass applied to $jar_path (3 targets)"

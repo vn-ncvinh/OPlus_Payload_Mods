@@ -86,7 +86,7 @@ def patch_void_return(lines: list[str], signature: str) -> bool:
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print("Usage: oplus_customize_patcher.py <jar.out>", file=sys.stderr)
+        print("Usage: patcher.py <jar.out>", file=sys.stderr)
         return 2
 
     root = Path(sys.argv[1])
@@ -126,15 +126,15 @@ def main() -> int:
     unexpected = sorted(patched - expected)
     if missing or unexpected:
         for target in missing:
-            print(f"[oplus-customize][error] Target not found: {target}", file=sys.stderr)
+            print(f"[lock-assistant-bypass][error] Target not found: {target}", file=sys.stderr)
         for target in unexpected:
-            print(f"[oplus-customize][error] Unexpected target: {target}", file=sys.stderr)
+            print(f"[lock-assistant-bypass][error] Unexpected target: {target}", file=sys.stderr)
         return 1
 
     for path, lines in changed_files.items():
         write_lines(path, lines)
     for target in sorted(patched):
-        print(f"[oplus-customize] patched {target}")
+        print(f"[lock-assistant-bypass] patched {target}")
     return 0
 
 
