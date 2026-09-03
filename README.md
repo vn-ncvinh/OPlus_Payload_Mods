@@ -18,8 +18,8 @@ Unknown project IDs are rejected.
 - Replace stock YouTube with YouTube Morphe (no microG).
 - `GGPhotosUnlimited`: enable unlimited Google Photos backup spoof.
 - `DisableFlagSecure`: allow screenshots and screen recording in restricted apps.
-- `LockAssistantBypass`: make `getOperator()` return `0` and `getFeeState()`
-  return `5`.
+- `LockAssistantBypass`: remove the `LockAssistant` app, make `getOperator()`
+  return `0`, and make `getFeeState()` return `5`.
 - Remove AVB flags from `vendor`, `boot`, and `vendor_boot` fstab files.
 - Generate GBL chainload EFISP from the payload `abl.img`.
 - Package and always flash the profile-specific versioned ABL donor.

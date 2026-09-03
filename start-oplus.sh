@@ -358,7 +358,8 @@ needs_partition_tree() {
             [[ "$enable_youtube" == true || "$enable_secure_flag" == true || \
                 "$enable_photos_spoof" == true || "$enable_lock_assistant_bypass" == true ]]
             ;;
-        system_ext|my_stock) [[ "$enable_debloat" == true ]] ;;
+        system_ext) [[ "$enable_debloat" == true ]] ;;
+        my_stock) [[ "$enable_debloat" == true || "$enable_lock_assistant_bypass" == true ]] ;;
         my_product) [[ "$enable_debloat" == true || "$enable_youtube" == true ]] ;;
         vendor) [[ "$enable_avb" == true ]] ;;
         *) return 1 ;;
