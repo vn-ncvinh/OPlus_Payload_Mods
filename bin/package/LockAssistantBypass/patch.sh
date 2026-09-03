@@ -39,4 +39,4 @@ zipalign -f 4 "$temp_dir/unaligned.jar" "$temp_dir/patched.jar" \
     || die "zipalign failed for oplus-services.jar"
 cp -f "$temp_dir/patched.jar" "$jar_path"
 mark_modified_path "$jar_path"
-mods "LockAssistantBypass applied to $jar_path (3 targets)"
+mods "LockAssistantBypass applied to $jar_path (2 targets)"

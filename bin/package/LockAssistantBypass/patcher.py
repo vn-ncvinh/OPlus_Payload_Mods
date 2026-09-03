@@ -5,14 +5,9 @@ from pathlib import Path
 
 
 CLASS_CUSTOMIZE_SERVICE = "Lcom/android/server/oplus/customize/OplusCustomizeService;"
-CLASS_LOCK_OBSERVER = (
-    "Lcom/android/server/oplus/customize/"
-    "OplusCustomizeService$LockAssistantFileObserver;"
-)
 
 METHOD_GET_OPERATOR = "getOperator()I"
 METHOD_GET_FEE_STATE = "getFeeState()I"
-METHOD_LOCK_EVENT = "onEvent(ILjava/lang/String;)V"
 
 
 def read_lines(path: Path) -> list[str]:
@@ -72,18 +67,6 @@ def patch_int_return(lines: list[str], signature: str, value: int) -> bool:
     )
 
 
-def patch_void_return(lines: list[str], signature: str) -> bool:
-    return replace_method_body(
-        lines,
-        signature,
-        [
-            "    .locals 0",
-            "",
-            "    return-void",
-        ],
-    )
-
-
 def main() -> int:
     if len(sys.argv) != 2:
         print("Usage: patcher.py <jar.out>", file=sys.stderr)
@@ -97,7 +80,6 @@ def main() -> int:
     expected = {
         f"{CLASS_CUSTOMIZE_SERVICE}->{METHOD_GET_OPERATOR}",
         f"{CLASS_CUSTOMIZE_SERVICE}->{METHOD_GET_FEE_STATE}",
-        f"{CLASS_LOCK_OBSERVER}->{METHOD_LOCK_EVENT}",
     }
     patched: set[str] = set()
     changed_files: dict[Path, list[str]] = {}
@@ -114,11 +96,6 @@ def main() -> int:
             if patch_int_return(lines, METHOD_GET_FEE_STATE, 5):
                 patched.add(f"{cls}->{METHOD_GET_FEE_STATE}")
                 changed = True
-        elif cls == CLASS_LOCK_OBSERVER:
-            if patch_void_return(lines, METHOD_LOCK_EVENT):
-                patched.add(f"{cls}->{METHOD_LOCK_EVENT}")
-                changed = True
-
         if changed:
             changed_files[path] = lines
 
