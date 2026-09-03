@@ -3,21 +3,8 @@ set -Eeuo pipefail
 
 source "$ROOT_DIR/functions.sh"
 
-mapfile -d '' framework_jars < <(find "$IMAGES_DIR/system" -type f -name framework.jar -print0)
-[[ ${#framework_jars[@]} -eq 1 ]] || die "Expected one framework.jar, found ${#framework_jars[@]}"
-jar_path="${framework_jars[0]}"
-temp_dir="$(mktemp -d "$WORK_DIR/ggphotos-unlimited.XXXXXX")"
-jar_out="$temp_dir/framework.jar.out"
-mkdir -p "$jar_out"
-
-unzip -q "$jar_path" -d "$jar_out" || die "Unable to unpack framework.jar"
-for dex in "$jar_out"/classes*.dex; do
-    [[ -f "$dex" ]] || continue
-    java -jar "$ROOT_DIR/bin/apktool/baksmaliv2.jar" d --api "$SDK_LEVEL" "$dex" -o "$dex.out" \
-        || die "baksmali failed for $(basename "$dex")"
-    rm -f "$dex"
-done
-
+[[ $# -eq 1 && -d "$1" ]] || die "Usage: GGPhotosUnlimited/patch.sh <jar.out>"
+jar_out="$1"
 python3 "$ROOT_DIR/bin/package/GGPhotosUnlimited/patcher.py" "$jar_out" \
     || die "Google Photos smali anchors were not found"
 
@@ -42,19 +29,3 @@ for class in Instrumentation.smali ApplicationPackageManager.smali; do
 done
 cp -f "$ROOT_DIR/bin/package/GGPhotosUnlimited/smali/com/xiaomi/globalmods/framework/GooglePhotosSpoof.smali" \
     "$new_dex/com/xiaomi/globalmods/framework/GooglePhotosSpoof.smali"
-
-for folder in "$jar_out"/classes*.dex.out; do
-    [[ -d "$folder" ]] || continue
-    dex="${folder%.out}"
-    java -jar "$ROOT_DIR/bin/apktool/smaliv2.jar" a --api "$SDK_LEVEL" "$folder" -o "$dex" \
-        || die "smali failed for $(basename "$folder")"
-    rm -rf "$folder"
-done
-
-(cd "$jar_out" && "$SEVENZIP" a -tzip -mx=0 "$temp_dir/framework-unaligned.jar" . >/dev/null) \
-    || die "Unable to rebuild framework.jar"
-zipalign -f 4 "$temp_dir/framework-unaligned.jar" "$temp_dir/framework.jar" \
-    || die "zipalign failed for framework.jar"
-cp -f "$temp_dir/framework.jar" "$jar_path"
-mark_modified_path "$jar_path"
-mods "GGPhotosUnlimited patched in $jar_path"

@@ -3,40 +3,6 @@ set -Eeuo pipefail
 
 source "$ROOT_DIR/functions.sh"
 
-mapfile -d '' jars < <(find "$IMAGES_DIR/system" -type f -name services.jar -print0)
-[[ ${#jars[@]} -eq 1 ]] || die "Expected one services.jar, found ${#jars[@]}"
-
-jar_path="${jars[0]}"
-temp_dir="$(mktemp -d "$WORK_DIR/disable-safe-media-volume.XXXXXX")"
-jar_out="$temp_dir/out"
-mkdir -p "$jar_out"
-
-unzip -q "$jar_path" -d "$jar_out" || die "Unable to unpack $jar_path"
-dex_count=0
-for dex in "$jar_out"/classes*.dex; do
-    [[ -f "$dex" ]] || continue
-    dex_count=$((dex_count + 1))
-    java -jar "$ROOT_DIR/bin/apktool/baksmaliv2.jar" d --api "$SDK_LEVEL" "$dex" -o "$dex.out" \
-        || die "baksmali failed for services.jar/$(basename "$dex")"
-    rm -f "$dex"
-done
-[[ "$dex_count" -gt 0 ]] || die "services.jar contains no DEX files"
-
-python3 "$ROOT_DIR/bin/package/DisableSafeMediaVolume/patcher.py" "$jar_out" \
+[[ $# -eq 1 && -d "$1" ]] || die "Usage: DisableSafeMediaVolume/patch.sh <jar.out>"
+python3 "$ROOT_DIR/bin/package/DisableSafeMediaVolume/patcher.py" "$1" \
     || die "SoundDoseHelper target is incompatible"
-
-for folder in "$jar_out"/classes*.dex.out; do
-    [[ -d "$folder" ]] || continue
-    dex="${folder%.out}"
-    java -jar "$ROOT_DIR/bin/apktool/smaliv2.jar" a --api "$SDK_LEVEL" "$folder" -o "$dex" \
-        || die "smali failed for services.jar/$(basename "$folder")"
-    rm -rf "$folder"
-done
-
-(cd "$jar_out" && "$SEVENZIP" a -tzip -mx=0 "$temp_dir/unaligned.jar" . >/dev/null) \
-    || die "Unable to rebuild services.jar"
-zipalign -f 4 "$temp_dir/unaligned.jar" "$temp_dir/patched.jar" \
-    || die "zipalign failed for services.jar"
-cp -f "$temp_dir/patched.jar" "$jar_path"
-mark_modified_path "$jar_path"
-mods "DisableSafeMediaVolume applied to $jar_path (1 target)"

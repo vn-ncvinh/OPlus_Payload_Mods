@@ -401,6 +401,15 @@ if [[ -d "$IMAGES_DIR/system" ]]; then
 fi
 export SDK_LEVEL
 
+source "$ROOT_DIR/bin/package/JarPatcher/functions.sh"
+framework_dir="$system_root/framework"
+register_jar services "$framework_dir/services.jar"
+[[ "$enable_lock_assistant_bypass" == true ]] \
+    && register_jar oplus-services "$framework_dir/oplus-services.jar"
+[[ "$enable_photos_spoof" == true ]] \
+    && register_jar framework "$framework_dir/framework.jar"
+unpack_jars
+
 if [[ "$enable_debloat" == true ]]; then
     mods "Applying debloat"
     bash "$ROOT_DIR/bin/ddevice/DEBLOAT/debloat.sh"
@@ -411,23 +420,31 @@ if [[ "$enable_youtube" == true ]]; then
     bash "$ROOT_DIR/bin/package/YOUTUBE_MORPHE/update.sh"
 fi
 
+if [[ "$enable_lock_assistant_bypass" == true ]]; then
+    mods "Removing LockAssistant app"
+    bash "$ROOT_DIR/bin/package/LockAssistantBypass/remove-app.sh"
+fi
+
 if [[ "$enable_secure_flag" == true ]]; then
     mods "Applying DisableFlagSecure"
-    bash "$ROOT_DIR/bin/package/DisableFlagSecure/patch.sh"
+    bash "$ROOT_DIR/bin/package/DisableFlagSecure/patch.sh" "$(jar_smali_root services)"
 fi
 
 mods "Applying DisableSafeMediaVolume"
-bash "$ROOT_DIR/bin/package/DisableSafeMediaVolume/patch.sh"
+bash "$ROOT_DIR/bin/package/DisableSafeMediaVolume/patch.sh" "$(jar_smali_root services)"
 
 if [[ "$enable_lock_assistant_bypass" == true ]]; then
     mods "Applying LockAssistantBypass"
-    bash "$ROOT_DIR/bin/package/LockAssistantBypass/patch.sh"
+    bash "$ROOT_DIR/bin/package/LockAssistantBypass/patch.sh" \
+        "$(jar_smali_root oplus-services)"
 fi
 
 if [[ "$enable_photos_spoof" == true ]]; then
     mods "Applying GGPhotosUnlimited"
-    bash "$ROOT_DIR/bin/package/GGPhotosUnlimited/patch.sh"
+    bash "$ROOT_DIR/bin/package/GGPhotosUnlimited/patch.sh" "$(jar_smali_root framework)"
 fi
+
+pack_jars
 
 repack_partition() {
     local part="$1"
