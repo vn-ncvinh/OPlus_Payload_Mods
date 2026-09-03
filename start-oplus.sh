@@ -29,7 +29,6 @@ Options:
   --skip-photos-spoof           Skip Google Photos Pixel XL spoof
   --skip-secure-flag            Skip secure-flag/screen-capture bypass
   --skip-lock-assistant-bypass  Skip LockAssistantBypass
-  --skip-avb                    Skip AVB fstab patches in vendor, boot and vendor_boot
   --keep-workdir                Keep temporary extracted files
   -h, --help                    Show this help
 EOF
@@ -45,7 +44,6 @@ enable_youtube=true
 enable_photos_spoof=true
 enable_secure_flag=true
 enable_lock_assistant_bypass=true
-enable_avb=true
 keep_workdir=false
 
 while [[ $# -gt 0 ]]; do
@@ -67,7 +65,6 @@ while [[ $# -gt 0 ]]; do
         --skip-photos-spoof) enable_photos_spoof=false; shift ;;
         --skip-secure-flag) enable_secure_flag=false; shift ;;
         --skip-lock-assistant-bypass) enable_lock_assistant_bypass=false; shift ;;
-        --skip-avb) enable_avb=false; shift ;;
         --keep-workdir) keep_workdir=true; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) die "Unknown option: $1" ;;
@@ -310,9 +307,7 @@ for part in "${DYNAMIC_PARTITIONS[@]}"; do
 done
 has_partition abl || die "Payload has no abl partition required for GBL chainload"
 has_partition vendor_boot || die "Payload has no vendor_boot partition"
-if [[ "$enable_avb" == true ]]; then
-    has_partition boot || die "Payload has no boot partition required for AVB patching"
-fi
+has_partition boot || die "Payload has no boot partition required for AVB patching"
 
 mv "$DETECT_RAW_DIR/my_manifest.img" "$RAW_DIR/my_manifest.img"
 mv "$DETECT_RAW_DIR/xbl_config.img" "$RAW_DIR/xbl_config.img"
@@ -355,13 +350,12 @@ declare -A ORIGINAL_SIZE=()
 needs_partition_tree() {
     case "$1" in
         system)
-            [[ "$enable_youtube" == true || "$enable_secure_flag" == true || \
-                "$enable_photos_spoof" == true || "$enable_lock_assistant_bypass" == true ]]
+            return 0
             ;;
         system_ext) [[ "$enable_debloat" == true ]] ;;
         my_stock) [[ "$enable_debloat" == true || "$enable_lock_assistant_bypass" == true ]] ;;
         my_product) [[ "$enable_debloat" == true || "$enable_youtube" == true ]] ;;
-        vendor) [[ "$enable_avb" == true ]] ;;
+        vendor) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -422,6 +416,9 @@ if [[ "$enable_secure_flag" == true ]]; then
     bash "$ROOT_DIR/bin/package/DisableFlagSecure/patch.sh"
 fi
 
+mods "Applying DisableSafeMediaVolume"
+bash "$ROOT_DIR/bin/package/DisableSafeMediaVolume/patch.sh"
+
 if [[ "$enable_lock_assistant_bypass" == true ]]; then
     mods "Applying LockAssistantBypass"
     bash "$ROOT_DIR/bin/package/LockAssistantBypass/patch.sh"
@@ -470,13 +467,11 @@ repack_partition() {
     info "$part.img repacked: $new_size bytes (payload image: $original_size bytes)"
 }
 
-if [[ "$enable_avb" == true ]]; then
-    mods "Removing AVB flags from vendor fstab"
-    if disable_avb_verify "$IMAGES_DIR/vendor"; then
-        mark_modified vendor
-    else
-        warn "No AVB fstab flags were found in vendor"
-    fi
+mods "Removing AVB flags from vendor fstab"
+if disable_avb_verify "$IMAGES_DIR/vendor"; then
+    mark_modified vendor
+else
+    warn "No AVB fstab flags were found in vendor"
 fi
 
 mapfile -t modified_partitions < <(sort -u "$PATCH_STATE_DIR/modified_partitions")
@@ -488,10 +483,8 @@ for part in "${modified_partitions[@]}"; do
     repack_partition "$part"
 done
 
-if [[ "$enable_avb" == true ]]; then
-    mods "Removing AVB flags from boot and vendor_boot ramdisks"
-    bash "$ROOT_DIR/bin/package/DISABLE_AVB/HMATools/start" "$BUILT_IMAGES_DIR" boot vendor_boot
-fi
+mods "Removing AVB flags from boot and vendor_boot ramdisks"
+bash "$ROOT_DIR/bin/package/DISABLE_AVB/HMATools/start" "$BUILT_IMAGES_DIR" boot vendor_boot
 
 is_dynamic_partition() {
     local wanted="$1" candidate
@@ -598,9 +591,9 @@ report="$PACKAGE_DIR/patch-report.txt"
     printf 'Anti-rollback: %s\n' "$arb_value"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
     printf 'Super logical allocation: %s / %s bytes\n' "$total_logical_size" "$SUPER_GROUP_SIZE"
-    printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nLockAssistantBypass: %s\nVendor/boot/vendor_boot AVB fstab patch: %s\n' \
+    printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nLockAssistantBypass: %s\nDisableSafeMediaVolume: true\nVendor/boot/vendor_boot AVB fstab patch: true\n' \
         "$enable_debloat" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag" \
-        "$enable_lock_assistant_bypass" "$enable_avb"
+        "$enable_lock_assistant_bypass"
     printf 'GBL chainload: v2.3.4 mode 1, OEM oplus\n'
     (cd "$PACKAGE_DIR" && sha256sum efisp-gbl-chainload-mode1.efi)
     printf '\nPatched logical partitions:\n'

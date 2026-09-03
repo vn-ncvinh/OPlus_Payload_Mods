@@ -20,6 +20,8 @@ Unknown project IDs are rejected.
 - `DisableFlagSecure`: allow screenshots and screen recording in restricted apps.
 - `LockAssistantBypass`: remove the `LockAssistant` app, make `getOperator()`
   return `0`, and make `getFeeState()` return `5`.
+- `DisableSafeMediaVolume`: make `SoundDoseHelper.checkSafeMediaVolume_l()`
+  always return `false`.
 - Remove AVB flags from `vendor`, `boot`, and `vendor_boot` fstab files.
 - Generate GBL chainload EFISP from the payload `abl.img`.
 - Package and always flash the profile-specific versioned ABL donor.
@@ -68,7 +70,6 @@ The output directory must be empty. To select another directory:
 --skip-photos-spoof           Disable GGPhotosUnlimited
 --skip-secure-flag            Disable DisableFlagSecure
 --skip-lock-assistant-bypass  Disable LockAssistantBypass
---skip-avb                    Keep stock AVB fstab flags
 --keep-workdir                Keep extracted temporary files
 ```
 
