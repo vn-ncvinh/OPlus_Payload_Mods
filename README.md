@@ -10,6 +10,8 @@ This repository is a standalone extraction of the required tooling and patch log
 - Exact-name debloat using `bin/ddevice/DEBLOAT/APPLIST.txt`.
 - YouTube Morphe without microG. The stock APK remains at `my_product/app/YouTube/YouTube.apk`; Android init bind-mounts Morphe over the OPlus `/product/app/YouTube` overlay view after Package Manager scans it.
 - Independently selectable Google Photos Pixel XL spoof and secure-flag/screen-capture bypass patches.
+- OPlus customization bypass: `getOperator()` returns `0`, `getFeeState()`
+  returns `5`, and the LockAssistant file observer ignores removal events.
 - Optional AVB-flag removal from `vendor` fstab plus the `boot` and `vendor_boot`
   ramdisks (`--skip-avb` disables it).
 - Early `xbl_config` anti-rollback inspection; only ARB `0` is accepted.
@@ -57,9 +59,12 @@ The bundled `arbextract` binary comes from
 The build stops before applying any mods when `xbl_config` reports non-zero ARB.
 
 Use `--skip-photos-spoof` and `--skip-secure-flag` to disable the two framework patches independently.
+Use `--skip-oplus-customize` to keep the stock OPlus operator, fee-state, and
+LockAssistant observer behavior.
 Disabled mods no longer cause unrelated filesystem trees to be unpacked: debloat
 uses `system_ext`, `my_product`, and `my_stock`; YouTube Morphe uses `system`
-and `my_product`; both framework patches use only `system`.
+and `my_product`; the framework and OPlus customization patches use only
+`system`.
 
 EROFS images are rebuilt with `lz4hc,9` compression and 16 KiB physical
 clusters. A modified logical image may grow beyond its old allocation as long
