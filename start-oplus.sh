@@ -292,6 +292,9 @@ PROFILE_FILE="$ROOT_DIR/devices/$device_id/profile.sh"
 source "$PROFILE_FILE"
 DONOR_DIR=""
 [[ -n "$DONOR_RELATIVE_DIR" ]] && DONOR_DIR="$ROOT_DIR/$DONOR_RELATIVE_DIR"
+[[ -n "${ABL_DONOR_IMAGE:-}" ]] || die "$DEVICE_DISPLAY profile has no ABL donor image"
+[[ -n "${ABL_DONOR_VERSION:-}" ]] || die "$DEVICE_DISPLAY profile has no ABL donor version"
+ABL_DONOR="$DONOR_DIR/$ABL_DONOR_IMAGE"
 info "Detected $DEVICE_DISPLAY (project ID: $project_ids, build: $build_display_id)"
 
 if [[ ${#DONOR_PARTITIONS[@]} -gt 0 ]]; then
@@ -517,6 +520,8 @@ cp -a "$FLASHER_TEMPLATE/." "$PACKAGE_DIR/"
     printf "DEVICE_ID='%s'\n" "$DEVICE_ID"
     printf "DEVICE_DISPLAY='%s'\n" "$DEVICE_DISPLAY"
     printf "SUPPORTED_PROJECT_IDS='%s'\n" "$SUPPORTED_PROJECT_IDS"
+    printf "ABL_DONOR_IMAGE='%s'\n" "$ABL_DONOR_IMAGE"
+    printf "ABL_DONOR_VERSION='%s'\n" "$ABL_DONOR_VERSION"
     printf 'TARGET_SUPER_BYTES=%s\n' "$SUPER_SIZE"
 } > "$PACKAGE_DIR/device-profile.conf"
 
@@ -526,6 +531,12 @@ for part in "${payload_partitions[@]}"; do
     raw_image="$RAW_DIR/$part.img"
     source_image="$raw_image"
     [[ -f "$raw_image" ]] || die "Extracted payload image is missing: $part.img"
+    if [[ "$part" == abl ]]; then
+        [[ -s "$ABL_DONOR" ]] || die "$DEVICE_DISPLAY ABL donor is missing"
+        cp -- "$ABL_DONOR" "$PACKAGE_DIR/$ABL_DONOR_IMAGE"
+        rm -f -- "$raw_image"
+        continue
+    fi
     if [[ ( "$part" == boot || "$part" == vendor_boot ) && -f "$BUILT_IMAGES_DIR/$part.img" ]]; then
         source_image="$BUILT_IMAGES_DIR/$part.img"
     fi
@@ -582,6 +593,7 @@ report="$PACKAGE_DIR/patch-report.txt"
     printf 'Device profile: %s (%s)\n' "$DEVICE_DISPLAY" "$DEVICE_ID"
     printf 'Payload project ID: %s\n' "$project_ids"
     printf 'Build display ID: %s\n' "$build_display_id"
+    printf 'ABL donor version: %s\n' "$ABL_DONOR_VERSION"
     printf 'Anti-rollback: %s\n' "$arb_value"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
     printf 'Super logical allocation: %s / %s bytes\n' "$total_logical_size" "$SUPER_GROUP_SIZE"
@@ -602,7 +614,7 @@ report="$PACKAGE_DIR/patch-report.txt"
     cd "$PACKAGE_DIR"
     {
         find OTA_FILES_HERE -maxdepth 1 -type f -name '*.img' -print
-        printf '%s\n' efisp-gbl-chainload-mode1.efi
+        printf '%s\n' "$ABL_DONOR_IMAGE" efisp-gbl-chainload-mode1.efi
     } | sort > required-images.txt
 )
 [[ -s "$PACKAGE_DIR/required-images.txt" ]] || die "No required image list was generated"
@@ -613,7 +625,7 @@ mods "Creating recovery ZIP (stored entries)"
 (
     cd "$PACKAGE_DIR"
     zip -0 -q -r "$zip_path" META-INF OTA_FILES_HERE tools patch-report.txt device-profile.conf \
-        required-images.txt efisp-gbl-chainload-mode1.efi
+        required-images.txt efisp-gbl-chainload-mode1.efi "$ABL_DONOR_IMAGE"
 ) || die "Failed to create recovery ZIP"
 [[ -s "$zip_path" ]] || die "Recovery ZIP is empty"
 

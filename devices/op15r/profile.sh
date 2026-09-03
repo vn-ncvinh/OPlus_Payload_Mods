@@ -16,3 +16,5 @@ DYNAMIC_PARTITIONS=(
 )
 DONOR_PARTITIONS=(system_dlkm_oki my_company my_preload)
 DONOR_RELATIVE_DIR="assets/op15r/donors"
+ABL_DONOR_IMAGE="abl-16.0.1.img"
+ABL_DONOR_VERSION="16.0.1"

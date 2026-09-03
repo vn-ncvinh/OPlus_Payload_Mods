@@ -16,3 +16,5 @@ DYNAMIC_PARTITIONS=(
 )
 DONOR_PARTITIONS=(my_company my_preload)
 DONOR_RELATIVE_DIR="assets/x9u/donors"
+ABL_DONOR_IMAGE="abl-16.0.6.img"
+ABL_DONOR_VERSION="16.0.6"

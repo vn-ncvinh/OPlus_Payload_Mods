@@ -12,6 +12,7 @@ BYNAME="/dev/block/by-name"
 SUPER_DEV="$BYNAME/super"
 SUPER_ENTRY="OTA_FILES_HERE/super.img"
 EFISP_ENTRY="efisp-gbl-chainload-mode1.efi"
+ABL_DONOR_ENTRY=""
 WRITER_ENTRY="tools/arm64/sparse_stream_writer"
 WRITER="$WORKDIR/sparse_stream_writer"
 ZIP_STREAMER_ENTRY="tools/arm64/stored_zip_streamer"
@@ -22,7 +23,6 @@ REQUIRED_IMAGES_LIST="$WORKDIR/required-images.txt"
 DEVICE_PROFILE_ENTRY="device-profile.conf"
 DEVICE_PROFILE_FILE="$WORKDIR/device-profile.conf"
 SUPER_WRITTEN=0
-FLASH_ABL=0
 
 TARGET_SUPER_BYTES=""
 
@@ -153,8 +153,17 @@ prepare_device_profile() {
     [ -n "$DEVICE_ID" ] || abort "Device profile has no ID"
     [ -n "$DEVICE_DISPLAY" ] || abort "Device profile has no display name"
     [ -n "$SUPPORTED_PROJECT_IDS" ] || abort "Device profile has no project IDs"
+    case "$ABL_DONOR_IMAGE" in
+        abl-*.img) ;;
+        *) abort "Device profile has invalid ABL donor image" ;;
+    esac
+    case "$ABL_DONOR_IMAGE" in
+        */*|*[!A-Za-z0-9._-]*) abort "Device profile has unsafe ABL donor image" ;;
+    esac
+    [ -n "$ABL_DONOR_VERSION" ] || abort "Device profile has no ABL donor version"
     is_uint "$TARGET_SUPER_BYTES" || abort "Device profile has invalid super size"
     uint_is_positive "$TARGET_SUPER_BYTES" || abort "Device profile has empty super size"
+    ABL_DONOR_ENTRY="$ABL_DONOR_IMAGE"
 }
 
 package_firmware_list() {
@@ -188,7 +197,7 @@ prepare_required_images() {
 
     while IFS= read -r ENTRY || [ -n "$ENTRY" ]; do
         case "$ENTRY" in
-            OTA_FILES_HERE/*.img|efisp-gbl-chainload-mode1.efi) ;;
+            OTA_FILES_HERE/*.img|abl-*.img|efisp-gbl-chainload-mode1.efi) ;;
             *) abort "Invalid required image entry: $ENTRY" ;;
         esac
         NAME="${ENTRY#OTA_FILES_HERE/}"
@@ -279,22 +288,6 @@ confirm_install() {
     exit 1
 }
 
-ask_flash_abl() {
-    ui_print "###################################"
-    ui_print "#           Flash ABL?            #"
-    ui_print "#      Vol+ YES      Vol- NO      #"
-    ui_print "###################################"
-    ui_print ""
-
-    if volume_key; then
-        FLASH_ABL=1
-        print_box "ABL will be flashed"
-    else
-        FLASH_ABL=0
-        print_box "Keeping the current ABL"
-    fi
-}
-
 unmount_for_install() {
     print_box "Unmounting partitions"
     for MOUNTPOINT in /system_root /system /system_ext /vendor /product /odm; do
@@ -360,6 +353,30 @@ validate_efisp_target() {
     is_uint "$TARGET_SIZE" || abort "Cannot read size of $EFISP_DEV"
     uint_le "$IMAGE_SIZE" "$TARGET_SIZE" ||
         abort "$EFISP_ENTRY is larger than efisp"
+}
+
+validate_abl_donor_target() {
+    package_has_file "$ABL_DONOR_ENTRY" || abort "Missing $ABL_DONOR_ENTRY"
+    IMAGE_SIZE="$(package_file_size "$ABL_DONOR_ENTRY")"
+    is_uint "$IMAGE_SIZE" || abort "Cannot read size of $ABL_DONOR_ENTRY"
+    uint_is_positive "$IMAGE_SIZE" || abort "$ABL_DONOR_ENTRY is empty"
+
+    resolve_targets abl
+    ABL_TARGETS="$TARGETS"
+    for TARGET in $ABL_TARGETS; do
+        TARGET_SIZE="$(blockdev --getsize64 "$TARGET" 2>/dev/null)"
+        is_uint "$TARGET_SIZE" || abort "Cannot read size of $TARGET"
+        uint_le "$IMAGE_SIZE" "$TARGET_SIZE" ||
+            abort "$ABL_DONOR_ENTRY is larger than $TARGET"
+    done
+}
+
+flash_abl_donor_image() {
+    for TARGET in $ABL_TARGETS; do
+        print_box "Flashing donor $(basename "$TARGET")"
+        unzip -p "$ZIPFILE" "$ABL_DONOR_ENTRY" > "$TARGET" \
+            2> "$WORKDIR/unzip-abl.log" || abort "Failed flashing $(basename "$TARGET")"
+    done
 }
 
 flash_efisp_image() {
@@ -457,6 +474,7 @@ ui_print "#          OPLUS MODS             #"
 ui_print "# $(printf '%-31.31s' "$DEVICE_DISPLAY") #"
 ui_print "#       Recovery Super Flasher    #"
 ui_print "###################################"
+ui_print "ABL donor: $ABL_DONOR_VERSION"
 ui_print ""
 
 PRJ_ID="$(getprop ro.boot.prjname 2>/dev/null)"
@@ -468,16 +486,22 @@ esac
 prepare_streamers
 prepare_required_images
 prepare_firmware_list
+validate_abl_donor_target
 validate_efisp_target
 
 set_progress 0.02
 show_progress 0.15 20
 
 confirm_install
-ask_flash_abl
 unmount_for_install
 
 set_progress 0.15
+flash_efisp_image
+sync
+
+flash_abl_donor_image
+sync
+
 show_progress 0.45 240
 
 FIRMWARE_COUNT=0
@@ -492,11 +516,6 @@ while IFS= read -r ENTRY; do
             print_box "Keeping current recovery"
             continue
             ;;
-        abl)
-            if [ "$FLASH_ABL" -ne 1 ]; then
-                continue
-            fi
-            ;;
     esac
 
     flash_firmware_image "$ENTRY"
@@ -504,9 +523,6 @@ while IFS= read -r ENTRY; do
 done < "$FIRMWARE_LIST"
 
 [ "$FIRMWARE_COUNT" -gt 0 ] || abort "No firmware images were flashed"
-sync
-
-flash_efisp_image
 sync
 
 set_progress 0.60

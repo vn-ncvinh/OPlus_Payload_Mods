@@ -22,6 +22,7 @@ Unknown project IDs are rejected.
   return `5`.
 - Remove AVB flags from `vendor`, `boot`, and `vendor_boot` fstab files.
 - Generate GBL chainload EFISP from the payload `abl.img`.
+- Package and always flash the profile-specific versioned ABL donor.
 
 Before building, the script checks `xbl_config` and stops unless ARB is `0`.
 
@@ -82,9 +83,12 @@ X9U_Mods_CPH2841_16.0.10.500(EX01)_Recovery.zip
 ```
 
 The recovery ZIP contains payload firmware, a profile-specific sparse
-`super.img`, required donor partitions, and the generated GBL chainload EFISP.
-The installer validates all required files before confirmation, then flashes
-through `/dev/block/by-name/*`. It does not resize or modify the GPT.
+`super.img`, required donor partitions, a versioned ABL donor such as
+`abl-16.0.6.img` at the ZIP root, and the generated GBL chainload EFISP. The
+installer validates all required files before confirmation, then always flashes
+EFISP and the profile ABL donor first, followed by the other firmware and
+`super.img`, through `/dev/block/by-name/*`. It does not resize or modify the
+GPT.
 
 ## Warning
 
