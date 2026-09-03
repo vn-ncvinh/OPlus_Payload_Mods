@@ -125,7 +125,7 @@ def patch_capture_display(lines: list[str]) -> int:
                 continue
 
         print(
-            "[secure-flag][warn] Found notAllowCaptureDisplay call but no move-result after it",
+            "[disable-flag-secure][warn] Found notAllowCaptureDisplay call but no move-result after it",
             file=sys.stderr,
         )
         i += 1
@@ -135,7 +135,7 @@ def patch_capture_display(lines: list[str]) -> int:
 
 def main() -> int:
     if len(sys.argv) not in (2, 3):
-        print("Usage: services_secure_patcher.py [--allow-empty] <jar.out>", file=sys.stderr)
+        print("Usage: patcher.py [--allow-empty] <jar.out>", file=sys.stderr)
         return 2
 
     allow_empty = False
@@ -144,7 +144,7 @@ def main() -> int:
         allow_empty = True
         args = args[1:]
     if len(args) != 1:
-        print("Usage: services_secure_patcher.py [--allow-empty] <jar.out>", file=sys.stderr)
+        print("Usage: patcher.py [--allow-empty] <jar.out>", file=sys.stderr)
         return 2
 
     root = Path(args[0])
@@ -205,12 +205,12 @@ def main() -> int:
         warnings.append("captureDisplay notAllowCaptureDisplay block not found; skipped")
 
     for item in patched_items:
-        print(f"[secure-flag] patched {item}")
+        print(f"[disable-flag-secure] patched {item}")
     for warning in warnings:
-        print(f"[secure-flag][warn] {warning}", file=sys.stderr)
+        print(f"[disable-flag-secure][warn] {warning}", file=sys.stderr)
 
     if not patched_items and not allow_empty:
-        print("[secure-flag][error] No services.jar secure-flag targets were patched", file=sys.stderr)
+        print("[disable-flag-secure][error] No compatible targets were patched", file=sys.stderr)
         return 1
 
     return 0

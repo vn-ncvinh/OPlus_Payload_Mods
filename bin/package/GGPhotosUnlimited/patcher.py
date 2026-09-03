@@ -168,7 +168,7 @@ def apply_patch(patch: Patch, base_dir: str) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Minimal Google Photos smali patcher")
+    parser = argparse.ArgumentParser(description="GGPhotosUnlimited smali patcher")
     parser.add_argument("base_dir", help="Thư mục chứa smali")
     args = parser.parse_args()
 

@@ -411,13 +411,13 @@ if [[ "$enable_youtube" == true ]]; then
 fi
 
 if [[ "$enable_secure_flag" == true ]]; then
-    mods "Applying secure-flag patch"
-    bash "$ROOT_DIR/bin/package/KouseiPatcher/secure_flag_patch.sh"
+    mods "Applying DisableFlagSecure"
+    bash "$ROOT_DIR/bin/package/DisableFlagSecure/patch.sh"
 fi
 
 if [[ "$enable_photos_spoof" == true ]]; then
-    mods "Applying Google Photos spoof"
-    bash "$ROOT_DIR/bin/package/KouseiPatcher/update.sh"
+    mods "Applying GGPhotosUnlimited"
+    bash "$ROOT_DIR/bin/package/GGPhotosUnlimited/patch.sh"
 fi
 
 repack_partition() {

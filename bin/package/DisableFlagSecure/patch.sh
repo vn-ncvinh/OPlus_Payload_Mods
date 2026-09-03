@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 source "$ROOT_DIR/functions.sh"
 
-temp_root="$(mktemp -d "$WORK_DIR/kousei-secure.XXXXXX")"
+temp_root="$(mktemp -d "$WORK_DIR/disable-flag-secure.XXXXXX")"
 patched_total=0
 index=0
 
@@ -26,9 +26,9 @@ while IFS= read -r -d '' jar_path; do
     [[ "$dex_count" -gt 0 ]] || continue
 
     patch_log="$temp_dir/patch.log"
-    python3 "$ROOT_DIR/bin/package/KouseiPatcher/services_secure_patcher.py" --allow-empty "$jar_out" \
+    python3 "$ROOT_DIR/bin/package/DisableFlagSecure/patcher.py" --allow-empty "$jar_out" \
         | tee "$patch_log"
-    count="$(grep -c '^\[secure-flag\] patched ' "$patch_log" || true)"
+    count="$(grep -c '^\[disable-flag-secure\] patched ' "$patch_log" || true)"
     if [[ "$count" -eq 0 ]]; then
         continue
     fi
@@ -47,12 +47,12 @@ while IFS= read -r -d '' jar_path; do
     cp -f "$temp_dir/patched.jar" "$jar_path"
     mark_modified_path "$jar_path"
     patched_total=$((patched_total + count))
-    mods "Secure-flag patch applied to $jar_path ($count targets)"
+    mods "DisableFlagSecure applied to $jar_path ($count targets)"
 done < <(
     find "$IMAGES_DIR/system" -type f \
         \( -name services.jar -o -name oplus-services.jar -o -name miui-services.jar \) \
         -print0
 )
 
-[[ "$patched_total" -gt 0 ]] || die "No compatible secure-flag target was found"
-mods "Secure-flag patch completed ($patched_total targets)"
+[[ "$patched_total" -gt 0 ]] || die "No compatible DisableFlagSecure target was found"
+mods "DisableFlagSecure completed ($patched_total targets)"

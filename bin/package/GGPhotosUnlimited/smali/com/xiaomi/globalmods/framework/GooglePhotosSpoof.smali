@@ -1,3 +1,4 @@
+# GGPhotosUnlimited runtime spoof.
 .class public final Lcom/xiaomi/globalmods/framework/GooglePhotosSpoof;
 .super Ljava/lang/Object;
 

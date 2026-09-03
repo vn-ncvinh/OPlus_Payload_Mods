@@ -9,7 +9,8 @@ This repository is a standalone extraction of the required tooling and patch log
 
 - Exact-name debloat using `bin/ddevice/DEBLOAT/APPLIST.txt`.
 - YouTube Morphe without microG. The stock APK remains at `my_product/app/YouTube/YouTube.apk`; Android init bind-mounts Morphe over the OPlus `/product/app/YouTube` overlay view after Package Manager scans it.
-- Independently selectable Google Photos Pixel XL spoof and secure-flag/screen-capture bypass patches.
+- Independent `GGPhotosUnlimited` Pixel XL spoof and `DisableFlagSecure`
+  screen-capture bypass patches.
 - Optional AVB-flag removal from `vendor` fstab plus the `boot` and `vendor_boot`
   ramdisks (`--skip-avb` disables it).
 - Early `xbl_config` anti-rollback inspection; only ARB `0` is accepted.

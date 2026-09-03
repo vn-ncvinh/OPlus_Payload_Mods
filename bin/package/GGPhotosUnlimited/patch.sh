@@ -6,7 +6,7 @@ source "$ROOT_DIR/functions.sh"
 mapfile -d '' framework_jars < <(find "$IMAGES_DIR/system" -type f -name framework.jar -print0)
 [[ ${#framework_jars[@]} -eq 1 ]] || die "Expected one framework.jar, found ${#framework_jars[@]}"
 jar_path="${framework_jars[0]}"
-temp_dir="$(mktemp -d "$WORK_DIR/kousei-framework.XXXXXX")"
+temp_dir="$(mktemp -d "$WORK_DIR/ggphotos-unlimited.XXXXXX")"
 jar_out="$temp_dir/framework.jar.out"
 mkdir -p "$jar_out"
 
@@ -18,7 +18,7 @@ for dex in "$jar_out"/classes*.dex; do
     rm -f "$dex"
 done
 
-python3 "$ROOT_DIR/bin/package/KouseiPatcher/photos_patcher.py" "$jar_out" \
+python3 "$ROOT_DIR/bin/package/GGPhotosUnlimited/patcher.py" "$jar_out" \
     || die "Google Photos smali anchors were not found"
 
 max_dex=1
@@ -40,7 +40,7 @@ for class in Instrumentation.smali ApplicationPackageManager.smali; do
     mkdir -p "$new_dex/$(dirname "$relative")"
     mv "$class_path" "$new_dex/$relative"
 done
-cp -f "$ROOT_DIR/bin/package/KouseiPatcher/photos_smali/com/xiaomi/globalmods/framework/GooglePhotosSpoof.smali" \
+cp -f "$ROOT_DIR/bin/package/GGPhotosUnlimited/smali/com/xiaomi/globalmods/framework/GooglePhotosSpoof.smali" \
     "$new_dex/com/xiaomi/globalmods/framework/GooglePhotosSpoof.smali"
 
 for folder in "$jar_out"/classes*.dex.out; do
@@ -57,4 +57,4 @@ zipalign -f 4 "$temp_dir/framework-unaligned.jar" "$temp_dir/framework.jar" \
     || die "zipalign failed for framework.jar"
 cp -f "$temp_dir/framework.jar" "$jar_path"
 mark_modified_path "$jar_path"
-mods "Google Photos spoof patched in $jar_path"
+mods "GGPhotosUnlimited patched in $jar_path"
