@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config>
+    <update-ownership
+        package="com.google.android.youtube"
+        installer="com.android.shell" />
+</config>

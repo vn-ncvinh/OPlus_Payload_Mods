@@ -87,12 +87,16 @@ system_root="$IMAGES_DIR/system"
 stock_target="$my_product/app/YouTube"
 patched_target="$my_product/etc/youtube-morphe"
 init_target="$system_root/etc/init"
+sysconfig_target="$system_root/etc/sysconfig"
 
 rm -rf -- "$stock_target" "$patched_target"
-mkdir -p "$stock_target/lib/arm64" "$patched_target/lib/arm64" "$init_target"
+mkdir -p "$stock_target/lib/arm64" "$patched_target/lib/arm64" \
+    "$init_target" "$sysconfig_target"
 cp -f "$stock_apk" "$stock_target/YouTube.apk"
 cp -f "$patched_apk" "$patched_target/YouTube.apk"
 cp -f "$ROOT_DIR/bin/package/YOUTUBE_MORPHE/youtube-morphe.rc" "$init_target/youtube-morphe.rc"
+cp -f "$ROOT_DIR/bin/package/YOUTUBE_MORPHE/oplus_mods_update_ownership.xml" \
+    "$sysconfig_target/oplus_mods_update_ownership.xml"
 
 mapfile -t native_libs < <(unzip -Z1 "$stock_apk" | grep '^lib/arm64-v8a/.*\.so$' || true)
 [[ ${#native_libs[@]} -gt 0 ]] || die "Stock YouTube APK has no arm64-v8a libraries"
@@ -102,6 +106,7 @@ unzip -q -j "$stock_apk" 'lib/arm64-v8a/*.so' -d "$patched_target/lib/arm64"
 find "$stock_target" "$patched_target" -type d -exec chmod 0755 {} +
 find "$stock_target" "$patched_target" -type f -exec chmod 0644 {} +
 chmod 0644 "$init_target/youtube-morphe.rc"
+chmod 0644 "$sysconfig_target/oplus_mods_update_ownership.xml"
 mark_modified my_product
 mark_modified system
 

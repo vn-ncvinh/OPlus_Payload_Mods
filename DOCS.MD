@@ -144,7 +144,7 @@ trees. Keep it synchronized with every mod's actual paths.
 | Modification | Default | Skip option | Required trees/JARs | Writes |
 | --- | --- | --- | --- | --- |
 | Debloat | On | `--skip-debloat` | `system_ext`, `my_product`, `my_stock` | Matching app directories; `my_product/etc/auto-install*` |
-| YouTube Morphe | On | `--skip-youtube-morphe` | `my_product`, `system` | YouTube APK/libs in `my_product`; init rc in `system/etc/init` |
+| YouTube Morphe | On | `--skip-youtube-morphe` | `my_product`, `system` | YouTube APK/libs in `my_product`; init rc and update-ownership sysconfig in `system/etc` |
 | GGPhotosUnlimited | On | `--skip-photos-spoof` | `system`; `framework.jar` | Framework smali and one new DEX tree |
 | DisableFlagSecure | On | `--skip-secure-flag` | `system`; `services.jar` | Window/device-policy smali targets available in the ROM |
 | LockAssistantBypass | On | `--skip-lock-assistant-bypass` | `system`, `my_stock`; `oplus-services.jar` | Removes LockAssistant from extracted app trees; patches two service methods |
@@ -287,7 +287,8 @@ The recovery installer:
 3. Validates required entries, image sizes, streamer binaries and block targets.
 4. Asks for one volume-key confirmation.
 5. Flashes EFISP first, then the ABL donor, ordinary firmware, and sparse super.
-6. Selects slot A and instructs the user to format Data.
+6. Selects slot A. The installer never creates or removes the optional manual
+   `/data/local/tmp/no-morphe` YouTube package-state marker.
 
 Firmware images are flashed to both `_a` and `_b` when both block devices exist,
 or to the unsuffixed block device otherwise. Sparse `super.img` is streamed from

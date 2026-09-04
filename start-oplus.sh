@@ -608,8 +608,8 @@ report="$PACKAGE_DIR/patch-report.txt"
     printf 'Anti-rollback: %s\n' "$arb_value"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
     printf 'Super logical allocation: %s / %s bytes\n' "$total_logical_size" "$SUPER_GROUP_SIZE"
-    printf 'Debloat: %s\nYouTube Morphe: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nLockAssistantBypass: %s\nDisableSafeMediaVolume: true\nVendor/boot/vendor_boot AVB fstab patch: true\n' \
-        "$enable_debloat" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag" \
+    printf 'Debloat: %s\nYouTube Morphe: %s\nYouTube update ownership: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nLockAssistantBypass: %s\nDisableSafeMediaVolume: true\nVendor/boot/vendor_boot AVB fstab patch: true\n' \
+        "$enable_debloat" "$enable_youtube" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag" \
         "$enable_lock_assistant_bypass"
     printf 'GBL chainload: v2.3.4 mode 1, OEM oplus\n'
     (cd "$PACKAGE_DIR" && sha256sum efisp-gbl-chainload-mode1.efi)

@@ -27,7 +27,8 @@ Always enabled:
 Enabled by default, with individual skip options:
 
 - Debloat using `bin/ddevice/DEBLOAT/APPLIST.txt`.
-- Integrate YouTube Morphe without microG.
+- Integrate YouTube Morphe without microG and assign its update ownership to
+  `com.android.shell`.
 - `GGPhotosUnlimited`: apply the Google Photos Pixel XL spoof.
 - `DisableFlagSecure`: bypass supported screenshot and screen-capture checks.
 - `LockAssistantBypass`: remove the LockAssistant app and patch
@@ -95,8 +96,11 @@ each block target and size before writing it. It then flashes, in order:
 3. Payload firmware images through `/dev/block/by-name/<partition>`.
 4. The generated sparse `super.img` directly to `/dev/block/by-name/super`.
 
-It does not resize the GPT or `super`, and it keeps the current recovery. Format
-Data before booting the newly flashed ROM.
+The installer does not create or remove `/data/local/tmp/no-morphe`. If that
+manual recovery marker exists, remove it manually after completing the YouTube
+package-state reset.
+
+It does not resize the GPT or `super`, and it keeps the current recovery.
 
 > [!WARNING]
 > This project modifies and flashes critical partitions. Use only a matching

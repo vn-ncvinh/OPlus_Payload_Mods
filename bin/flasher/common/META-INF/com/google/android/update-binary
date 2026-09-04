@@ -550,7 +550,6 @@ ui_print "#       Installation complete     #"
 ui_print "###################################"
 ui_print ""
 print_box "Super: $TARGET_SUPER_BYTES bytes"
-print_box "Format Data before Android"
 
 cleanup
 exit 0
