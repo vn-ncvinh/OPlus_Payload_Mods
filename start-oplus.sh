@@ -471,7 +471,7 @@ repack_partition() {
                 || die "Failed to repack $part as EXT4"
             ;;
         EROFS)
-            "$MKFS_EROFS" --quiet -zlz4hc,9 -C 16384 --mount-point "$part" \
+            "$MKFS_EROFS" --quiet -zlz4 -C 16384 --mount-point "$part" \
                 --fs-config-file="$fs_config" --file-contexts="$file_contexts" \
                 "$output" "$tree" >/dev/null \
                 || die "Failed to repack $part as EROFS"
