@@ -147,7 +147,7 @@ trees. Keep it synchronized with every mod's actual paths.
 | YouTube Morphe | On | `--skip-youtube-morphe` | `my_product`, `system` | YouTube APK/libs in `my_product`; init rc and update-ownership sysconfig in `system/etc` |
 | GGPhotosUnlimited | On | `--skip-photos-spoof` | `system`; `framework.jar` | Framework smali and one new DEX tree |
 | DisableFlagSecure | On | `--skip-secure-flag` | `system`; `services.jar` | Window/device-policy smali targets available in the ROM |
-| LockAssistantBypass | On | `--skip-lock-assistant-bypass` | `system`, `my_stock`; `oplus-services.jar` | Removes LockAssistant from extracted app trees; patches two service methods |
+| LockAssistantBypass | On; carrier snapshot component is X9U-only | `--skip-lock-assistant-bypass` | `system`, `my_stock`, and for X9U `system_ext`; `oplus-services.jar`, X9U `subsys-channel-lock-plugin.jar`, profile snapshot | Removes LockAssistant, patches two service methods, and replaces X9U modem carrier-lock data before parsing |
 | DisableSafeMediaVolume | Always | None | `system`; `services.jar` | `SoundDoseHelper.checkSafeMediaVolume_l(III)Z` returns false |
 | AVB fstab removal | Always | None | `vendor`, raw `boot`, raw `vendor_boot` | Removes `avb`, `avb=`, `avb_keys=` and `verify` fstab flags |
 
@@ -166,6 +166,12 @@ Current smali targets are deliberately independent:
   `SoundDoseHelper.checkSafeMediaVolume_l(III)Z` with `false`.
 - `LockAssistantBypass`: replaces
   `OplusCustomizeService.getOperator()I` with `0` and `getFeeState()I` with `5`.
+  Its X9U-only carrier component replaces the input to
+  `LockDataProcessor.parseDataFromTlv([BZ)I` with the fixed profile snapshot,
+  then lets stock parsing, cache updates, change masks, and `checkNvValid()` run
+  normally. The snapshot is the captured 200-byte unlocked response with only
+  operator `0x00fe` changed to legacy-unlocked `0x00ff`. OP15R has no snapshot,
+  so only this component is skipped for that profile.
 - `DisableFlagSecure`: patches compatible `WindowState`/`WindowStateAnimator`,
   `DevicePolicyCacheImpl`, and OEM capture-display guards in `services.jar`.
   OEM targets vary by ROM, so missing optional capture-display anchors are
@@ -191,6 +197,7 @@ Current registrations:
 | `services` | `system/framework/services.jar` | Always |
 | `oplus-services` | `system/framework/oplus-services.jar` | LockAssistantBypass enabled |
 | `framework` | `system/framework/framework.jar` | GGPhotosUnlimited enabled |
+| `subsys-channel-lock` | `system_ext/framework/subsys-channel-lock-plugin.jar` | X9U LockAssistantBypass carrier component enabled |
 
 Inside an extracted system-as-root image, `system_root` may resolve to either
 `images/system` or `images/system/system`; always use the resolved
@@ -198,7 +205,7 @@ Inside an extracted system-as-root image, `system_root` may resolve to either
 
 `register_jar` must finish before `unpack_jars`. Registering later, unpacking
 twice, packing before unpack, or packing twice is intentionally fatal. A mod's
-`patch.sh` receives exactly one prepared directory such as:
+`patch.sh` normally receives one prepared directory such as:
 
 ```text
 $WORK_DIR/jars/services/unpacked
@@ -207,6 +214,9 @@ $WORK_DIR/jars/services/unpacked
 It contains archive resources plus `classes.dex.out`, `classes2.dex.out`, etc.
 The original DEX files are removed during disassembly and recreated only by
 `pack_jars`. Reuse an existing JAR ID when several mods target the same JAR.
+`LockAssistantBypass` is the deliberate multi-JAR exception: its wrapper gets
+the `oplus-services` root and, on X9U, the `subsys-channel-lock` root plus the
+fixed profile snapshot. Both roots are still unpacked and packed only once.
 
 ## Adding a mod
 

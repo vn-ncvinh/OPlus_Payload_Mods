@@ -31,8 +31,10 @@ Enabled by default, with individual skip options:
   `com.android.shell`.
 - `GGPhotosUnlimited`: apply the Google Photos Pixel XL spoof.
 - `DisableFlagSecure`: bypass supported screenshot and screen-capture checks.
-- `LockAssistantBypass`: remove the LockAssistant app and patch
-  `OplusCustomizeService.getOperator()`/`getFeeState()`.
+- `LockAssistantBypass`: remove the LockAssistant app, patch
+  `OplusCustomizeService.getOperator()`/`getFeeState()`, and, on the Find X9
+  Ultra, replace modem carrier-lock data with the captured unlocked snapshot
+  whose operator is changed from `254` to `-1`.
 
 ## Requirements
 
@@ -73,7 +75,8 @@ Options:
 --skip-youtube-morphe         Do not integrate YouTube Morphe
 --skip-photos-spoof           Do not apply GGPhotosUnlimited
 --skip-secure-flag            Do not apply DisableFlagSecure
---skip-lock-assistant-bypass  Keep LockAssistant and its stock service methods
+--skip-lock-assistant-bypass  Keep LockAssistant, its stock service methods,
+                              and the stock CarrierLockInfo values
 --keep-workdir                Preserve temporary files for inspection
 ```
 

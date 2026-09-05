@@ -28,7 +28,7 @@ Options:
   --skip-youtube-morphe         Skip YouTube Morphe integration
   --skip-photos-spoof           Skip Google Photos Pixel XL spoof
   --skip-secure-flag            Skip secure-flag/screen-capture bypass
-  --skip-lock-assistant-bypass  Skip LockAssistantBypass
+  --skip-lock-assistant-bypass  Skip LockAssistantBypass, including carrier-lock spoof
   --keep-workdir                Keep temporary extracted files
   -h, --help                    Show this help
 EOF
@@ -44,6 +44,7 @@ enable_youtube=true
 enable_photos_spoof=true
 enable_secure_flag=true
 enable_lock_assistant_bypass=true
+enable_lock_assistant_carrier_spoof=false
 keep_workdir=false
 
 while [[ $# -gt 0 ]]; do
@@ -289,6 +290,16 @@ PROFILE_FILE="$ROOT_DIR/devices/$device_id/profile.sh"
 source "$PROFILE_FILE"
 DONOR_DIR=""
 [[ -n "$DONOR_RELATIVE_DIR" ]] && DONOR_DIR="$ROOT_DIR/$DONOR_RELATIVE_DIR"
+if [[ "$enable_lock_assistant_bypass" == true ]]; then
+    if [[ -n "${CARRIER_LOCK_SNAPSHOT:-}" ]]; then
+        CARRIER_LOCK_SNAPSHOT_PATH="$ROOT_DIR/$CARRIER_LOCK_SNAPSHOT"
+        [[ -f "$CARRIER_LOCK_SNAPSHOT_PATH" ]] \
+            || die "$DEVICE_DISPLAY carrier-lock snapshot is missing"
+        enable_lock_assistant_carrier_spoof=true
+    else
+        info "LockAssistantBypass carrier-lock spoof is not available for $DEVICE_DISPLAY; skipping that component"
+    fi
+fi
 [[ -n "${ABL_DONOR_IMAGE:-}" ]] || die "$DEVICE_DISPLAY profile has no ABL donor image"
 [[ -n "${ABL_DONOR_VERSION:-}" ]] || die "$DEVICE_DISPLAY profile has no ABL donor version"
 ABL_DONOR="$DONOR_DIR/$ABL_DONOR_IMAGE"
@@ -352,7 +363,7 @@ needs_partition_tree() {
         system)
             return 0
             ;;
-        system_ext) [[ "$enable_debloat" == true ]] ;;
+        system_ext) [[ "$enable_debloat" == true || "$enable_lock_assistant_carrier_spoof" == true ]] ;;
         my_stock) [[ "$enable_debloat" == true || "$enable_lock_assistant_bypass" == true ]] ;;
         my_product) [[ "$enable_debloat" == true || "$enable_youtube" == true ]] ;;
         vendor) return 0 ;;
@@ -403,11 +414,17 @@ export SDK_LEVEL
 
 source "$ROOT_DIR/bin/package/JarPatcher/functions.sh"
 framework_dir="$system_root/framework"
+system_ext_root="$IMAGES_DIR/system_ext"
+[[ -d "$system_ext_root/system_ext/framework" ]] && system_ext_root="$system_ext_root/system_ext"
+system_ext_framework_dir="$system_ext_root/framework"
 register_jar services "$framework_dir/services.jar"
 [[ "$enable_lock_assistant_bypass" == true ]] \
     && register_jar oplus-services "$framework_dir/oplus-services.jar"
 [[ "$enable_photos_spoof" == true ]] \
     && register_jar framework "$framework_dir/framework.jar"
+[[ "$enable_lock_assistant_carrier_spoof" == true ]] \
+    && register_jar subsys-channel-lock \
+        "$system_ext_framework_dir/subsys-channel-lock-plugin.jar"
 unpack_jars
 
 if [[ "$enable_debloat" == true ]]; then
@@ -435,8 +452,14 @@ bash "$ROOT_DIR/bin/package/DisableSafeMediaVolume/patch.sh" "$(jar_smali_root s
 
 if [[ "$enable_lock_assistant_bypass" == true ]]; then
     mods "Applying LockAssistantBypass"
+    lock_assistant_patch_args=("$(jar_smali_root oplus-services)")
+    if [[ "$enable_lock_assistant_carrier_spoof" == true ]]; then
+        lock_assistant_patch_args+=(
+            "$(jar_smali_root subsys-channel-lock)" "$CARRIER_LOCK_SNAPSHOT_PATH"
+        )
+    fi
     bash "$ROOT_DIR/bin/package/LockAssistantBypass/patch.sh" \
-        "$(jar_smali_root oplus-services)"
+        "${lock_assistant_patch_args[@]}"
 fi
 
 if [[ "$enable_photos_spoof" == true ]]; then
@@ -608,9 +631,9 @@ report="$PACKAGE_DIR/patch-report.txt"
     printf 'Anti-rollback: %s\n' "$arb_value"
     printf 'Android SDK: %s\n' "$SDK_LEVEL"
     printf 'Super logical allocation: %s / %s bytes\n' "$total_logical_size" "$SUPER_GROUP_SIZE"
-    printf 'Debloat: %s\nYouTube Morphe: %s\nYouTube update ownership: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nLockAssistantBypass: %s\nDisableSafeMediaVolume: true\nVendor/boot/vendor_boot AVB fstab patch: true\n' \
+    printf 'Debloat: %s\nYouTube Morphe: %s\nYouTube update ownership: %s\nGoogle Photos spoof: %s\nSecure flag: %s\nLockAssistantBypass: %s\nLockAssistantBypass carrier-lock snapshot: %s\nDisableSafeMediaVolume: true\nVendor/boot/vendor_boot AVB fstab patch: true\n' \
         "$enable_debloat" "$enable_youtube" "$enable_youtube" "$enable_photos_spoof" "$enable_secure_flag" \
-        "$enable_lock_assistant_bypass"
+        "$enable_lock_assistant_bypass" "$enable_lock_assistant_carrier_spoof"
     printf 'GBL chainload: v2.3.4 mode 1, OEM oplus\n'
     (cd "$PACKAGE_DIR" && sha256sum efisp-gbl-chainload-mode1.efi)
     printf '\nPatched logical partitions:\n'
