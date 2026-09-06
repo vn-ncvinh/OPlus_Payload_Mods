@@ -9,7 +9,7 @@ Build a modded, recovery-flashable ZIP from an OPlus full OTA ZIP or
 | Device | Accepted project ID | ABL donor | Required `super` size |
 | --- | --- | --- | ---: |
 | OPPO Find X9 Ultra | `25021`, `25022`, `25211` | `16.0.6` | `20,451,426,304` bytes |
-| OnePlus 15R | `24877` | `16.0.1` | `16,231,956,480` bytes |
+| OnePlus 15R | `24855`, `24877` | `16.0.1` | `16,231,956,480` bytes |
 
 The build stops for an unknown project ID or when `xbl_config` reports a
 non-zero anti-rollback (ARB) value.
