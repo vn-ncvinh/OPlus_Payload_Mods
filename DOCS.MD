@@ -93,7 +93,7 @@ Current profiles:
 
 | Profile | Project ID | Payload-backed dynamic set | Donor logical partitions | ABL donor |
 | --- | --- | --- | --- | --- |
-| `x9u` | `25211` | 15, without `system_dlkm_oki` and `my_company`/`my_preload` | `my_company`, `my_preload` | `abl-16.0.6.img` |
+| `x9u` | `25021`, `25022`, `25211` | 15, without `system_dlkm_oki` and `my_company`/`my_preload` | `my_company`, `my_preload` | `abl-16.0.6.img` |
 | `op15r` | `24877` | 15, without `my_company`/`my_preload` | `system_dlkm_oki`, `my_company`, `my_preload` | `abl-16.0.1.img` |
 
 Each `profile.sh` defines:
